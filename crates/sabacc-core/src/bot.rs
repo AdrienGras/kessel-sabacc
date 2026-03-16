@@ -3,7 +3,9 @@ use rand::Rng;
 use crate::card::CardValue;
 use crate::game::{Action, GamePhase, GameState};
 use crate::scoring::ImpostorChoice;
+use crate::shift_token::ShiftToken;
 use crate::turn::{DiscardChoice, DrawSource, TurnAction};
+use crate::PlayerId;
 
 /// Trait for bot decision-making strategies.
 pub trait BotStrategy {
@@ -15,6 +17,13 @@ pub trait BotStrategy {
 
     /// Choose impostor die values.
     fn choose_impostor(&self, state: &GameState, rng: &mut impl Rng) -> Action;
+
+    /// Optionally choose a shift token to play before Draw/Stand.
+    /// Returns None if the bot decides not to play a token.
+    fn choose_token(&self, state: &GameState, rng: &mut impl Rng) -> Option<Action>;
+
+    /// Choose a PrimeSabacc dice value.
+    fn choose_prime_sabacc(&self, state: &GameState, rng: &mut impl Rng) -> Action;
 }
 
 /// A basic bot that makes weighted random decisions.
@@ -43,7 +52,8 @@ impl BotStrategy for BasicBot {
             50
         };
 
-        if player.chips == 0 || rng.gen_range(0..100) >= draw_chance {
+        let can_draw_free = state.free_draw_active;
+        if !can_draw_free && (player.chips == 0 || rng.gen_range(0..100) >= draw_chance) {
             Action::PlayerAction {
                 player_id: pid,
                 action: TurnAction::Stand,
@@ -171,6 +181,145 @@ impl BotStrategy for BasicBot {
             blood_choice,
         })
     }
+
+    fn choose_token(&self, state: &GameState, rng: &mut impl Rng) -> Option<Action> {
+        let player = &state.players[state.current_player_idx];
+        let pid = player.id;
+
+        if player.shift_tokens.is_empty() {
+            return None;
+        }
+
+        // ~30% chance to play a token per turn
+        if rng.gen_range(0..100) >= 30 {
+            return None;
+        }
+
+        let hand_diff = if let Some(ref hand) = player.hand {
+            let s = card_numeric_value(&hand.sand.value);
+            let b = card_numeric_value(&hand.blood.value);
+            s.abs_diff(b)
+        } else {
+            3
+        };
+
+        let threat = most_threatening(state, pid);
+
+        // Try tokens in priority order
+        for token in &player.shift_tokens {
+            let action = match token {
+                // Self-buff priority: Immunity when hand is strong
+                ShiftToken::Immunity if hand_diff <= 1 => Some(ShiftToken::Immunity),
+
+                // FreeDraw when difference is high
+                ShiftToken::FreeDraw if hand_diff >= 3 => Some(ShiftToken::FreeDraw),
+
+                // Tariffs on turn 3
+                ShiftToken::GeneralTariff if state.turn == 3 => Some(ShiftToken::GeneralTariff),
+                ShiftToken::TargetTariff(_) if state.turn >= 2 => {
+                    threat.map(ShiftToken::TargetTariff)
+                }
+
+                // Refund when invested
+                ShiftToken::Refund if player.pot >= 2 => Some(ShiftToken::Refund),
+                ShiftToken::ExtraRefund if player.pot >= 2 => Some(ShiftToken::ExtraRefund),
+
+                // Embezzlement when multiple opponents
+                ShiftToken::Embezzlement => {
+                    let active = state.players.iter().filter(|p| !p.is_eliminated && p.id != pid).count();
+                    if active >= 2 { Some(ShiftToken::Embezzlement) } else { None }
+                }
+
+                // Modifiers on turn 2+
+                ShiftToken::CookTheBooks if state.turn >= 2 && hand_diff == 0 => {
+                    // Only if we have a high-value sabacc
+                    if let Some(ref hand) = player.hand {
+                        let s = card_numeric_value(&hand.sand.value);
+                        if s >= 4 { Some(ShiftToken::CookTheBooks) } else { None }
+                    } else {
+                        None
+                    }
+                }
+                ShiftToken::Markdown if state.turn >= 2 => Some(ShiftToken::Markdown),
+                ShiftToken::MajorFraud if state.turn >= 2 => Some(ShiftToken::MajorFraud),
+
+                // Embargo
+                ShiftToken::Embargo if state.turn >= 2 => Some(ShiftToken::Embargo),
+
+                // Offensive tokens
+                ShiftToken::Exhaustion(_) if state.turn >= 2 => {
+                    threat.map(ShiftToken::Exhaustion)
+                }
+                ShiftToken::DirectTransaction(_) if hand_diff >= 4 => {
+                    threat.map(ShiftToken::DirectTransaction)
+                }
+
+                // Audits
+                ShiftToken::GeneralAudit if state.turn == 3 => Some(ShiftToken::GeneralAudit),
+                ShiftToken::TargetAudit(_) if state.turn >= 2 => {
+                    threat.map(ShiftToken::TargetAudit)
+                }
+
+                // PrimeSabacc on turn 3 with bad hand
+                ShiftToken::PrimeSabacc if state.turn == 3 && hand_diff >= 2 => {
+                    Some(ShiftToken::PrimeSabacc)
+                }
+
+                _ => None,
+            };
+
+            if let Some(chosen) = action {
+                return Some(Action::PlayShiftToken {
+                    player_id: pid,
+                    token: chosen,
+                });
+            }
+        }
+
+        None
+    }
+
+    fn choose_prime_sabacc(&self, state: &GameState, _rng: &mut impl Rng) -> Action {
+        let (player_id, die1, die2) = match &state.phase {
+            GamePhase::PrimeSabaccChoice {
+                player_id,
+                die1,
+                die2,
+            } => (*player_id, *die1, *die2),
+            _ => panic!("choose_prime_sabacc called in wrong phase"),
+        };
+
+        // Pick the die value closest to the other card in hand
+        let player = state.players.iter().find(|p| p.id == player_id);
+        let chosen = if let Some(player) = player {
+            if let Some(ref hand) = player.hand {
+                let sand_val = card_numeric_value(&hand.sand.value);
+                let blood_val = card_numeric_value(&hand.blood.value);
+                // Pick value closest to either card
+                let target = sand_val.min(blood_val);
+                pick_closest(die1, die2, target)
+            } else {
+                die1.min(die2)
+            }
+        } else {
+            die1.min(die2)
+        };
+
+        Action::SubmitPrimeSabaccChoice {
+            player_id,
+            chosen_value: chosen,
+        }
+    }
+}
+
+/// Find the most threatening opponent (non-eliminated, most chips).
+fn most_threatening(state: &GameState, self_id: PlayerId) -> Option<PlayerId> {
+    state
+        .players
+        .iter()
+        .filter(|p| !p.is_eliminated && p.id != self_id)
+        .max_by_key(|p| p.total_chips())
+        .map(|p| p.id)
 }
 
 /// Get a numeric value for comparison. Sylop=0, Impostor=7 (placeholder), Number=n.
@@ -196,7 +345,7 @@ fn pick_closest(die1: u8, die2: u8, target: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{self, GameConfig};
+    use crate::game::{self, GameConfig, TokenDistribution};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 
@@ -215,6 +364,7 @@ mod tests {
             starting_chips: 6,
             buy_in: 100,
             enable_shift_tokens: false,
+            token_distribution: TokenDistribution::None,
         };
 
         let state = game::new_game(config, &mut rng).unwrap();
@@ -254,5 +404,28 @@ mod tests {
         assert_eq!(pick_closest(2, 5, 3), 2);
         assert_eq!(pick_closest(2, 5, 4), 5);
         assert_eq!(pick_closest(3, 3, 3), 3);
+    }
+
+    #[test]
+    fn most_threatening_finds_richest() {
+        let mut rng = test_rng();
+        let config = GameConfig {
+            players: vec![
+                ("P1".into(), true),
+                ("P2".into(), true),
+                ("P3".into(), true),
+            ],
+            starting_chips: 6,
+            buy_in: 100,
+            enable_shift_tokens: false,
+            token_distribution: TokenDistribution::None,
+        };
+
+        let mut state = game::new_game(config, &mut rng).unwrap();
+        // Give P2 extra chips
+        state.players[2].chips = 10;
+
+        let threat = most_threatening(&state, 0);
+        assert_eq!(threat, Some(2));
     }
 }

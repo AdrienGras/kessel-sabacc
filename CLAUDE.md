@@ -480,3 +480,194 @@ Palette:
 - Générer des assets graphiques — les visuels sont 100% SVG/code
 - Modifier les règles du jeu telles que définies dans ce fichier sans demande
   explicite
+
+---
+
+## Décisions d'implémentation (Phase 1)
+
+### Design patterns retenus
+
+| Sujet | Décision | Raison |
+|-------|----------|--------|
+| RNG | `rand` 0.8 + `&mut impl Rng` en paramètre | Tests déterministes avec `SmallRng::seed_from_u64` |
+| Machine à états | `GamePhase` enum + `apply_action(state, action, rng) -> Result` | Fonctions pures, pas de mutation cachée |
+| Draw flow | 2 étapes : `Draw(source)` → `ChoosingDiscard` → `ChooseDiscard` | Permet au frontend de montrer la carte piochée avant le choix |
+| HandRank | `strength_key() -> (u8, u8)` explicite, pas de `derive(Ord)` | Contrôle fin du classement, support des modifiers (CookTheBooks) |
+| Bot | Trait `BotStrategy` + `BasicBot` | Extensible pour des stratégies plus avancées |
+| Versions | `version.workspace = true` dans les sub-crates | Centralise le versioning dans le Cargo.toml racine |
+| Modifiers Phase 2 | `ActiveModifiers` struct passée à `evaluate_hand` et `compare_ranks` | Hooks pour ShiftTokens sans changer l'API |
+
+### Fichiers ajoutés à Phase 1 (non dans le plan original)
+
+- `bot.rs` — IA basique incluse dans le core (pas un crate séparé)
+- `tests/full_game.rs` — tests d'intégration avec seed fixe
+
+### GamePhase final (diffère légèrement de la spec initiale)
+
+```rust
+pub enum GamePhase {
+    Setup,
+    TurnAction,
+    ChoosingDiscard { player_id, drawn_card },  // état intermédiaire après pioche
+    ImpostorReveal { pending, submitted },        // avec tracking des choix soumis
+    Reveal { results },
+    RoundEnd,
+    GameOver { winner },
+}
+```
+
+Note : `Penalty` a été fusionné dans `Reveal` → `AdvanceRound` → `RoundEnd`.
+
+---
+
+## Décisions d'implémentation (Phase 2 — ShiftTokens)
+
+### Nouvelles phases et actions
+
+```rust
+// Nouveau variant GamePhase
+PrimeSabaccChoice { player_id, die1, die2 }
+
+// Nouvelle action
+SubmitPrimeSabaccChoice { player_id, chosen_value }
+```
+
+### Nouveau HandRank
+
+`PrimeSabacc { value }` inséré entre PureSabacc (0,0) et SylopSabacc (1,x) avec
+strength_key `(0, 1)`.
+
+### ActiveModifiers étendu
+
+```rust
+pub struct ActiveModifiers {
+    pub markdown_active: bool,
+    pub cook_the_books_active: bool,
+    pub major_fraud_active: bool,           // NEW
+    pub immune_players: Vec<PlayerId>,      // NEW
+    pub prime_sabacc: Option<PrimeSabaccModifier>, // NEW
+}
+```
+
+### État par tour sur GameState
+
+```rust
+pub stood_this_turn: Vec<PlayerId>,
+pub embargoed_player: Option<PlayerId>,
+pub token_played_this_turn: bool,
+pub free_draw_active: bool,
+pub pending_audit: PendingAudit,
+```
+
+Ces champs sont reset à chaque nouveau tour (dans `advance_turn`) et nouvelle
+manche (dans `apply_advance_round`).
+
+### TokenDistribution
+
+```rust
+pub enum TokenDistribution {
+    Random { tokens_per_player: usize },
+    Fixed(Vec<ShiftToken>),
+    None,  // Phase 1 compat
+}
+```
+
+### Bot IA tokens
+
+Le trait `BotStrategy` a été étendu avec :
+- `choose_token()` → ~30% chance par tour, heuristique par type de token
+- `choose_prime_sabacc()` → valeur de dé la plus proche des cartes en main
+- Targeting stratégique via `most_threatening()` (joueur avec le plus de chips)
+
+### Audit resolution
+
+Les audits sont résolus en fin de **tour** (quand tous les joueurs ont agi),
+pas en fin de manche. Le source du GeneralAudit est exclu de son propre effet.
+
+### Fichiers ajoutés à Phase 2
+
+- `tests/shift_token_tests.rs` — 32 tests unitaires et d'intégration
+
+---
+
+## Lessons learned
+
+### Commitizen + Cargo workspaces
+
+Le provider Cargo de `commitizen` (`version_provider = "cargo"`) ne supporte pas
+bien les workspaces Rust :
+- Il cherche `[package]` dans le `Cargo.toml` racine, pas `[workspace.package]`
+- Le `set_lock_version` crash si le workspace n'a pas de `[package].name`
+- **Workaround** : utiliser `[workspace.package].version` et faire le bump
+  manuellement (modifier le TOML + tag + commit), ou commit gitmoji manuellement
+  puis `git tag`
+
+### Deck total_cards après deal_hands
+
+`deal_hands` pioche 1 carte initiale de défausse puis la replace dans la pile de
+défausse du même deck → `total_cards()` ne change pas pour cette opération.
+Seules les cartes distribuées aux joueurs réduisent le total.
+
+### Clippy et mut
+
+Clippy est strict sur les `mut` inutiles et les imports non utilisés dans les
+modules de test. Toujours vérifier clippy après compilation mais avant commit.
+
+---
+
+## Flow de push (référence rapide)
+
+Workflow standard pour une feature :
+
+```bash
+# 1. Créer un worktree isolé
+git worktree add .worktrees/<feature-name> -b feat/<feature-name>
+cd .worktrees/<feature-name>
+
+# 2. Développer + tester
+cargo test -p <crate>
+cargo clippy -p <crate> -- -D warnings
+
+# 3. Commit dans le worktree (format gitmoji)
+git add <fichiers>
+git commit -m "✨ feat: description courte
+
+Description longue si nécessaire.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+
+# 4. Retour sur main + merge
+cd <project-root>
+git checkout main
+git merge feat/<feature-name>
+
+# 5. Bump version
+# Option A — cz bump (si ça marche avec le workspace)
+cz bump --yes
+
+# Option B — manuel (si cz crashe)
+# Modifier [workspace.package].version dans Cargo.toml racine
+# cargo generate-lockfile
+# git add Cargo.toml Cargo.lock crates/*/Cargo.toml
+# git commit -m "🔖 bump: version X.Y.Z → A.B.C"
+# git tag A.B.C
+
+# 6. Push avec tags
+git push --follow-tags
+
+# 7. Cleanup
+git worktree remove .worktrees/<feature-name>  # --force si fichiers non trackés
+git branch -d feat/<feature-name>
+```
+
+### Convention de commits (gitmoji + conventional)
+
+| Emoji | Type | Usage |
+|-------|------|-------|
+| ✨ | feat | Nouvelle fonctionnalité |
+| 🐛 | fix | Correction de bug |
+| ♻️ | refactor | Refactoring sans changement fonctionnel |
+| ✅ | test | Ajout/modification de tests |
+| 🔧 | chore | Configuration, tooling |
+| 🔖 | bump | Changement de version |
+| 🎉 | init | Commit initial |

@@ -28,6 +28,11 @@ impl Hand {
 pub enum HandRank {
     /// Two Sylops (Sand Sylop + Blood Sylop) — strongest hand.
     PureSabacc,
+    /// PrimeSabacc shift token override — beats everything except PureSabacc.
+    PrimeSabacc {
+        /// The chosen dice value that defines this Sabacc.
+        value: u8,
+    },
     /// One Sylop + one numbered card — the Sylop copies the number, yielding 0 difference.
     SylopSabacc {
         /// The value of the numbered card.
@@ -57,6 +62,7 @@ impl HandRank {
     pub fn strength_key(&self) -> (u8, u8) {
         match self {
             HandRank::PureSabacc => (0, 0),
+            HandRank::PrimeSabacc { .. } => (0, 1),
             HandRank::SylopSabacc { value } => (1, *value),
             HandRank::Sabacc { pair_value } => (2, *pair_value),
             HandRank::NonSabacc { difference } => (3, *difference),
@@ -89,12 +95,14 @@ mod tests {
     #[test]
     fn strength_ordering() {
         let pure = HandRank::PureSabacc;
+        let prime = HandRank::PrimeSabacc { value: 3 };
         let sylop = HandRank::SylopSabacc { value: 3 };
         let sabacc_low = HandRank::Sabacc { pair_value: 1 };
         let sabacc_high = HandRank::Sabacc { pair_value: 6 };
         let non_sabacc = HandRank::NonSabacc { difference: 2 };
 
-        assert!(pure.strength_key() < sylop.strength_key());
+        assert!(pure.strength_key() < prime.strength_key());
+        assert!(prime.strength_key() < sylop.strength_key());
         assert!(sylop.strength_key() < sabacc_low.strength_key());
         assert!(sabacc_low.strength_key() < sabacc_high.strength_key());
         assert!(sabacc_high.strength_key() < non_sabacc.strength_key());

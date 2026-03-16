@@ -61,4 +61,27 @@ pub enum GameError {
     /// ShiftTokens are not enabled in this game configuration.
     #[error("shift tokens are not enabled")]
     ShiftTokensDisabled,
+
+    /// The player does not own this shift token.
+    #[error("player {player_id} does not own this shift token")]
+    ShiftTokenNotOwned { player_id: PlayerId },
+
+    /// A shift token has already been played this turn.
+    #[error("a shift token has already been played this turn")]
+    ShiftTokenAlreadyPlayed,
+
+    /// The target for this shift token is invalid.
+    #[error("invalid token target for player {player_id}: {reason}")]
+    InvalidTokenTarget {
+        player_id: PlayerId,
+        reason: String,
+    },
+
+    /// The player has no invested chips to refund.
+    #[error("player {player_id} has no invested chips")]
+    NoInvestedChips { player_id: PlayerId },
+
+    /// The chosen PrimeSabacc value is not available from the dice roll.
+    #[error("prime sabacc choice {chosen} not available from roll ({die1}, {die2})")]
+    InvalidPrimeSabaccChoice { chosen: u8, die1: u8, die2: u8 },
 }

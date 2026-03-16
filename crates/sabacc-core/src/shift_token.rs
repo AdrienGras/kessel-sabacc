@@ -4,9 +4,6 @@ use crate::PlayerId;
 ///
 /// Each shift token can only be used once per game (not per round),
 /// before a Draw or Stand action.
-///
-/// In Phase 1, shift tokens are defined but their logic is not implemented.
-/// Playing a shift token will be rejected with `ShiftTokensDisabled`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShiftToken {
     /// Draw without paying 1 chip this turn.
@@ -41,4 +38,76 @@ pub enum ShiftToken {
     DirectTransaction(PlayerId),
     /// Roll 2 dice; the chosen value becomes the best Sabacc.
     PrimeSabacc,
+}
+
+impl ShiftToken {
+    /// Compare token types by discriminant, ignoring inner values.
+    pub fn matches_type(&self, other: &ShiftToken) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+
+    /// Whether this token requires a target player ID when played.
+    pub fn requires_target(&self) -> bool {
+        matches!(
+            self,
+            ShiftToken::TargetTariff(_)
+                | ShiftToken::TargetAudit(_)
+                | ShiftToken::Exhaustion(_)
+                | ShiftToken::DirectTransaction(_)
+        )
+    }
+
+    /// Get all 16 token types (targeted tokens use placeholder id 0).
+    pub fn all_types() -> Vec<ShiftToken> {
+        vec![
+            ShiftToken::FreeDraw,
+            ShiftToken::Refund,
+            ShiftToken::ExtraRefund,
+            ShiftToken::GeneralTariff,
+            ShiftToken::TargetTariff(0),
+            ShiftToken::Embargo,
+            ShiftToken::Markdown,
+            ShiftToken::Immunity,
+            ShiftToken::GeneralAudit,
+            ShiftToken::TargetAudit(0),
+            ShiftToken::MajorFraud,
+            ShiftToken::Embezzlement,
+            ShiftToken::CookTheBooks,
+            ShiftToken::Exhaustion(0),
+            ShiftToken::DirectTransaction(0),
+            ShiftToken::PrimeSabacc,
+        ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_type_same() {
+        assert!(ShiftToken::FreeDraw.matches_type(&ShiftToken::FreeDraw));
+        assert!(ShiftToken::TargetTariff(0).matches_type(&ShiftToken::TargetTariff(1)));
+    }
+
+    #[test]
+    fn matches_type_different() {
+        assert!(!ShiftToken::FreeDraw.matches_type(&ShiftToken::Refund));
+        assert!(!ShiftToken::TargetTariff(0).matches_type(&ShiftToken::TargetAudit(0)));
+    }
+
+    #[test]
+    fn requires_target_correct() {
+        assert!(!ShiftToken::FreeDraw.requires_target());
+        assert!(!ShiftToken::GeneralTariff.requires_target());
+        assert!(ShiftToken::TargetTariff(0).requires_target());
+        assert!(ShiftToken::TargetAudit(0).requires_target());
+        assert!(ShiftToken::Exhaustion(0).requires_target());
+        assert!(ShiftToken::DirectTransaction(0).requires_target());
+    }
+
+    #[test]
+    fn all_types_has_16() {
+        assert_eq!(ShiftToken::all_types().len(), 16);
+    }
 }

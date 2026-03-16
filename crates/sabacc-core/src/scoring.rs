@@ -3,14 +3,28 @@ use crate::error::GameError;
 use crate::hand::{Hand, HandRank};
 use crate::PlayerId;
 
+/// Modifier for the PrimeSabacc shift token.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrimeSabaccModifier {
+    /// The player who activated PrimeSabacc.
+    pub player_id: PlayerId,
+    /// The dice value chosen by the player.
+    pub chosen_value: u8,
+}
+
 /// Modifiers applied by active shift tokens.
-/// In Phase 1, this is always `Default` (no modifiers).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ActiveModifiers {
     /// If true, Sylop value becomes 0 (doesn't match the other card).
     pub markdown_active: bool,
     /// If true, the hand ranking is inverted (6/6 beats 1/1).
     pub cook_the_books_active: bool,
+    /// If true, Impostor value is forced to 6.
+    pub major_fraud_active: bool,
+    /// Players who are immune to opponent shift token effects.
+    pub immune_players: Vec<PlayerId>,
+    /// Active PrimeSabacc override, if any.
+    pub prime_sabacc: Option<PrimeSabaccModifier>,
 }
 
 /// A player's choice for resolving an Impostor card.
@@ -123,16 +137,28 @@ pub fn resolve_round(
         return Vec::new();
     }
 
+    // Apply PrimeSabacc override if active
+    let mut player_ranks: Vec<(PlayerId, HandRank, u8)> = players.to_vec();
+    if let Some(ref prime) = modifiers.prime_sabacc {
+        for entry in &mut player_ranks {
+            if entry.0 == prime.player_id {
+                entry.1 = HandRank::PrimeSabacc {
+                    value: prime.chosen_value,
+                };
+            }
+        }
+    }
+
     // Find the best rank
-    let best_key = players
+    let best_key = player_ranks
         .iter()
         .map(|(_, rank, _)| adjusted_strength_key(rank, modifiers))
         .min()
         .unwrap_or((255, 255));
 
-    let mut results = Vec::with_capacity(players.len());
+    let mut results = Vec::with_capacity(player_ranks.len());
 
-    for (player_id, rank, invested) in players {
+    for (player_id, rank, invested) in &player_ranks {
         let key = adjusted_strength_key(rank, modifiers);
         let is_winner = key == best_key;
 
@@ -141,7 +167,10 @@ pub fn resolve_round(
         } else {
             match rank {
                 // Losing Sabacc hand -> 1 chip penalty
-                HandRank::PureSabacc | HandRank::SylopSabacc { .. } | HandRank::Sabacc { .. } => 1,
+                HandRank::PureSabacc
+                | HandRank::PrimeSabacc { .. }
+                | HandRank::SylopSabacc { .. }
+                | HandRank::Sabacc { .. } => 1,
                 // Non-Sabacc -> penalty equal to difference
                 HandRank::NonSabacc { difference } => *difference,
             }
@@ -170,12 +199,16 @@ fn resolve_card_value(
     value: &CardValue,
     impostor_choice: Option<&ImpostorChoice>,
     is_sand: bool,
-    _modifiers: &ActiveModifiers,
+    modifiers: &ActiveModifiers,
 ) -> Result<ResolvedValue, GameError> {
     match value {
         CardValue::Number(n) => Ok(ResolvedValue::Number(*n)),
         CardValue::Sylop => Ok(ResolvedValue::Sylop),
         CardValue::Impostor => {
+            if modifiers.major_fraud_active {
+                // MajorFraud: impostor value forced to 6, no dice needed
+                return Ok(ResolvedValue::Number(6));
+            }
             let choice = impostor_choice.ok_or(GameError::ImpostorChoiceRequired {
                 player_id: 0, // caller should handle this
             })?;

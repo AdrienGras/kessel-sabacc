@@ -17,6 +17,7 @@ fn full_game_terminates_with_seed_42() {
         starting_chips: 6,
         buy_in: 100,
         enable_shift_tokens: false,
+        token_distribution: sabacc_core::game::TokenDistribution::None,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -32,7 +33,8 @@ fn full_game_terminates_with_seed_42() {
             panic!("game did not terminate within {} iterations", max_iterations);
         }
 
-        match &state.phase {
+        let phase = state.phase.clone();
+        match &phase {
             GamePhase::GameOver { winner } => {
                 // Verify winner exists and is not eliminated
                 let winner_player = state.players.iter().find(|p| p.id == *winner).unwrap();
@@ -120,6 +122,18 @@ fn full_game_terminates_with_seed_42() {
             GamePhase::RoundEnd => {
                 state = game::apply_action(state, Action::AdvanceRound, &mut rng).unwrap();
             }
+            GamePhase::PrimeSabaccChoice { player_id, die1, .. } => {
+                // Human: pick first die value
+                state = game::apply_action(
+                    state,
+                    Action::SubmitPrimeSabaccChoice {
+                        player_id: *player_id,
+                        chosen_value: *die1,
+                    },
+                    &mut rng,
+                )
+                .unwrap();
+            }
             GamePhase::Setup => {
                 panic!("unexpected Setup phase during game");
             }
@@ -140,6 +154,7 @@ fn chip_conservation_across_rounds() {
         starting_chips: 6,
         buy_in: 100,
         enable_shift_tokens: false,
+        token_distribution: sabacc_core::game::TokenDistribution::None,
     };
 
     let initial_total_chips = 6u16 * 3;
@@ -202,6 +217,7 @@ fn four_player_game_terminates() {
         starting_chips: 4,
         buy_in: 50,
         enable_shift_tokens: false,
+        token_distribution: sabacc_core::game::TokenDistribution::None,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();

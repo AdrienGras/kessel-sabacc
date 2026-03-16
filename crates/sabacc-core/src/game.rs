@@ -10,6 +10,28 @@ use crate::shift_token::ShiftToken;
 use crate::turn::{DiscardChoice, DrawSource, TurnAction};
 use crate::PlayerId;
 
+/// How shift tokens are distributed to players at game start.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenDistribution {
+    /// Each player gets `tokens_per_player` random tokens from the 16 types.
+    Random { tokens_per_player: usize },
+    /// Each player gets a fixed set of tokens.
+    Fixed(Vec<ShiftToken>),
+    /// No tokens distributed (Phase 1 compatibility).
+    None,
+}
+
+/// Pending audit effects to resolve at end of turn.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PendingAudit {
+    /// Whether a GeneralAudit is active.
+    pub general: bool,
+    /// The player who played GeneralAudit (excluded from effect).
+    pub general_source: Option<PlayerId>,
+    /// Target player for TargetAudit.
+    pub target: Option<PlayerId>,
+}
+
 /// Configuration for a new game.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameConfig {
@@ -21,6 +43,8 @@ pub struct GameConfig {
     pub buy_in: u32,
     /// Whether shift tokens are enabled (Phase 2).
     pub enable_shift_tokens: bool,
+    /// How tokens are distributed.
+    pub token_distribution: TokenDistribution,
 }
 
 impl Default for GameConfig {
@@ -33,6 +57,7 @@ impl Default for GameConfig {
             starting_chips: 6,
             buy_in: 100,
             enable_shift_tokens: false,
+            token_distribution: TokenDistribution::None,
         }
     }
 }
@@ -62,6 +87,15 @@ pub enum GamePhase {
     Reveal {
         /// The round results.
         results: Vec<RoundResult>,
+    },
+    /// A player must choose a PrimeSabacc dice value.
+    PrimeSabaccChoice {
+        /// The player who played PrimeSabacc.
+        player_id: PlayerId,
+        /// First die value.
+        die1: u8,
+        /// Second die value.
+        die2: u8,
     },
     /// Round ended, waiting to advance.
     RoundEnd,
@@ -95,6 +129,16 @@ pub struct GameState {
     pub modifiers: ActiveModifiers,
     /// Game configuration.
     pub config: GameConfig,
+    /// Players who chose Stand this turn (for Audit resolution).
+    pub stood_this_turn: Vec<PlayerId>,
+    /// Player forced to Stand by Embargo (if any).
+    pub embargoed_player: Option<PlayerId>,
+    /// Whether a shift token has been played this turn by the current player.
+    pub token_played_this_turn: bool,
+    /// Whether FreeDraw is active for the current player's draw.
+    pub free_draw_active: bool,
+    /// Pending audit effects.
+    pub pending_audit: PendingAudit,
 }
 
 /// An action that can be applied to the game state.
@@ -116,10 +160,15 @@ pub enum Action {
     SubmitImpostorChoice(ImpostorChoice),
     /// Advance to the next round after viewing results.
     AdvanceRound,
-    /// Play a shift token (rejected in Phase 1).
+    /// Play a shift token.
     PlayShiftToken {
         player_id: PlayerId,
         token: ShiftToken,
+    },
+    /// Submit a PrimeSabacc dice choice.
+    SubmitPrimeSabaccChoice {
+        player_id: PlayerId,
+        chosen_value: u8,
     },
 }
 
@@ -154,6 +203,11 @@ pub fn new_game(config: GameConfig, rng: &mut impl Rng) -> Result<GameState, Gam
         credits_in_pot,
         modifiers: ActiveModifiers::default(),
         config,
+        stood_this_turn: Vec::new(),
+        embargoed_player: None,
+        token_played_this_turn: false,
+        free_draw_active: false,
+        pending_audit: PendingAudit::default(),
     })
 }
 
@@ -173,15 +227,17 @@ pub fn apply_action(
         }
         Action::SubmitImpostorChoice(choice) => apply_impostor_choice(state, choice, rng),
         Action::AdvanceRound => apply_advance_round(state, rng),
-        Action::PlayShiftToken { .. } => {
+        Action::PlayShiftToken { player_id, token } => {
             if !state.config.enable_shift_tokens {
                 Err(GameError::ShiftTokensDisabled)
             } else {
-                Err(GameError::InvalidActionForPhase {
-                    reason: "shift tokens not yet implemented".into(),
-                })
+                apply_shift_token(state, player_id, token, rng)
             }
         }
+        Action::SubmitPrimeSabaccChoice {
+            player_id,
+            chosen_value,
+        } => apply_prime_sabacc_choice(state, player_id, chosen_value)
     }
 }
 
@@ -195,13 +251,37 @@ pub fn available_actions(state: &GameState) -> Vec<Action> {
                 return vec![];
             }
             let pid = player.id;
-            let mut actions = vec![Action::PlayerAction {
+            let mut actions = Vec::new();
+
+            // Shift token actions (if not already played this turn)
+            if state.config.enable_shift_tokens
+                && !state.token_played_this_turn
+                && !player.shift_tokens.is_empty()
+            {
+                for token in &player.shift_tokens {
+                    actions.push(Action::PlayShiftToken {
+                        player_id: pid,
+                        token: token.clone(),
+                    });
+                }
+            }
+
+            // If embargoed, only Stand is available
+            if state.embargoed_player == Some(pid) {
+                actions.push(Action::PlayerAction {
+                    player_id: pid,
+                    action: TurnAction::Stand,
+                });
+                return actions;
+            }
+
+            actions.push(Action::PlayerAction {
                 player_id: pid,
                 action: TurnAction::Stand,
-            }];
+            });
 
-            // Can only draw if player has chips
-            if player.chips > 0 {
+            // Can draw if player has chips or FreeDraw is active
+            if player.chips > 0 || state.free_draw_active {
                 for source in [
                     DrawSource::SandDeck,
                     DrawSource::BloodDeck,
@@ -224,6 +304,23 @@ pub fn available_actions(state: &GameState) -> Vec<Action> {
             }
 
             actions
+        }
+        GamePhase::PrimeSabaccChoice {
+            player_id,
+            die1,
+            die2,
+        } => {
+            let mut choices = vec![Action::SubmitPrimeSabaccChoice {
+                player_id: *player_id,
+                chosen_value: *die1,
+            }];
+            if die1 != die2 {
+                choices.push(Action::SubmitPrimeSabaccChoice {
+                    player_id: *player_id,
+                    chosen_value: *die2,
+                });
+            }
+            choices
         }
         GamePhase::ChoosingDiscard { player_id, .. } => {
             vec![
@@ -261,6 +358,16 @@ pub fn advance_bots(
                 if !player.is_bot || player.is_eliminated {
                     return Ok(state);
                 }
+
+                // Bot may play a token first
+                if state.config.enable_shift_tokens && !state.token_played_this_turn {
+                    if let Some(token_action) = bot.choose_token(&state, rng) {
+                        state = apply_action(state, token_action, rng)?;
+                        // After token, loop back (might be PrimeSabaccChoice or still TurnAction)
+                        continue;
+                    }
+                }
+
                 let action = bot.choose_action(&state, rng);
                 state = apply_action(state, action, rng)?;
             }
@@ -289,6 +396,17 @@ pub fn advance_bots(
                     _ => return Ok(state),
                 }
             }
+            GamePhase::PrimeSabaccChoice { player_id, .. } => {
+                let pid = *player_id;
+                let player = state.players.iter().find(|p| p.id == pid);
+                match player {
+                    Some(p) if p.is_bot => {
+                        let action = bot.choose_prime_sabacc(&state, rng);
+                        state = apply_action(state, action, rng)?;
+                    }
+                    _ => return Ok(state),
+                }
+            }
             _ => return Ok(state),
         }
     }
@@ -310,6 +428,9 @@ fn apply_start_game(
     state.turn = 1;
     state.current_player_idx = 0;
 
+    // Distribute shift tokens
+    distribute_tokens(&mut state, rng);
+
     round::deal_hands(
         &mut state.players,
         &mut state.sand_deck,
@@ -322,6 +443,40 @@ fn apply_start_game(
     skip_eliminated(&mut state);
 
     Ok(state)
+}
+
+/// Distribute shift tokens to players based on config.
+fn distribute_tokens(state: &mut GameState, rng: &mut impl Rng) {
+    match &state.config.token_distribution {
+        TokenDistribution::None => {}
+        TokenDistribution::Fixed(tokens) => {
+            for player in &mut state.players {
+                if !player.is_eliminated {
+                    player.shift_tokens = tokens.clone();
+                }
+            }
+        }
+        TokenDistribution::Random { tokens_per_player } => {
+            let all_types = ShiftToken::all_types();
+            let n = *tokens_per_player;
+            for player in &mut state.players {
+                if !player.is_eliminated {
+                    let mut available = all_types.clone();
+                    shuffle_vec(&mut available, rng);
+                    player.shift_tokens = available.into_iter().take(n).collect();
+                }
+            }
+        }
+    }
+}
+
+/// Shuffle a Vec using Fisher-Yates.
+fn shuffle_vec<T>(items: &mut [T], rng: &mut impl Rng) {
+    let len = items.len();
+    for i in (1..len).rev() {
+        let j = rng.gen_range(0..=i);
+        items.swap(i, j);
+    }
 }
 
 fn apply_player_action(
@@ -344,14 +499,32 @@ fn apply_player_action(
         return Err(GameError::PlayerEliminated { player_id });
     }
 
+    // Embargo check: if this player is embargoed, they must Stand
+    if let Some(embargoed_id) = state.embargoed_player {
+        if embargoed_id == player_id && !matches!(action, TurnAction::Stand) {
+            return Err(GameError::InvalidActionForPhase {
+                reason: "player is embargoed and must Stand".into(),
+            });
+        }
+    }
+
     match action {
         TurnAction::Stand => {
+            state.stood_this_turn.push(player_id);
+            // Clear embargo after the embargoed player stands
+            if state.embargoed_player == Some(player_id) {
+                state.embargoed_player = None;
+            }
             advance_turn(&mut state, rng)?;
             Ok(state)
         }
         TurnAction::Draw(source) => {
-            // Pay 1 chip
-            state.players[state.current_player_idx].pay_chip()?;
+            // Pay 1 chip (unless FreeDraw is active)
+            if state.free_draw_active {
+                state.free_draw_active = false;
+            } else {
+                state.players[state.current_player_idx].pay_chip()?;
+            }
 
             // Draw the card
             let drawn = match source {
@@ -501,6 +674,13 @@ fn apply_advance_round(
             state.current_player_idx = 0;
             state.modifiers = ActiveModifiers::default();
 
+            // Reset per-turn state
+            state.stood_this_turn.clear();
+            state.embargoed_player = None;
+            state.token_played_this_turn = false;
+            state.free_draw_active = false;
+            state.pending_audit = PendingAudit::default();
+
             round::deal_hands(
                 &mut state.players,
                 &mut state.sand_deck,
@@ -521,6 +701,10 @@ fn apply_advance_round(
 
 /// Advance to the next player/turn, or begin revelation if turn 3 is complete.
 fn advance_turn(state: &mut GameState, _rng: &mut impl Rng) -> Result<(), GameError> {
+    // Reset per-player token state
+    state.token_played_this_turn = false;
+    state.free_draw_active = false;
+
     // Move to next player
     state.current_player_idx += 1;
 
@@ -533,6 +717,14 @@ fn advance_turn(state: &mut GameState, _rng: &mut impl Rng) -> Result<(), GameEr
 
     // If we've gone through all players, advance the turn
     if state.current_player_idx >= state.players.len() {
+        // Resolve audits at end of turn
+        resolve_audits(state);
+
+        // Reset per-turn state
+        state.stood_this_turn.clear();
+        state.embargoed_player = None;
+        state.pending_audit = PendingAudit::default();
+
         if state.turn >= 3 {
             // End of turn 3: begin revelation
             begin_revelation(state)?;
@@ -547,6 +739,306 @@ fn advance_turn(state: &mut GameState, _rng: &mut impl Rng) -> Result<(), GameEr
     }
 
     Ok(())
+}
+
+/// Resolve pending audit effects at end of turn.
+fn resolve_audits(state: &mut GameState) {
+    let immune = &state.modifiers.immune_players;
+
+    // GeneralAudit: all Stand players (except source, except immune) lose 2 chips
+    if state.pending_audit.general {
+        let source = state.pending_audit.general_source;
+        for pid in &state.stood_this_turn {
+            if source == Some(*pid) || immune.contains(pid) {
+                continue;
+            }
+            if let Some(player) = state.players.iter_mut().find(|p| p.id == *pid) {
+                player.apply_penalty(2);
+            }
+        }
+    }
+
+    // TargetAudit: if target stood and is not immune, lose 3 chips
+    if let Some(target_id) = state.pending_audit.target {
+        if state.stood_this_turn.contains(&target_id) && !immune.contains(&target_id) {
+            if let Some(player) = state.players.iter_mut().find(|p| p.id == target_id) {
+                player.apply_penalty(3);
+            }
+        }
+    }
+}
+
+/// Apply a shift token action.
+fn apply_shift_token(
+    mut state: GameState,
+    player_id: PlayerId,
+    token: ShiftToken,
+    rng: &mut impl Rng,
+) -> Result<GameState, GameError> {
+    // Must be in TurnAction phase
+    if !matches!(state.phase, GamePhase::TurnAction) {
+        return Err(GameError::InvalidActionForPhase {
+            reason: "not in TurnAction phase".into(),
+        });
+    }
+
+    // Must be current player
+    let current = &state.players[state.current_player_idx];
+    if current.id != player_id {
+        return Err(GameError::NotPlayerTurn { player_id });
+    }
+    if current.is_eliminated {
+        return Err(GameError::PlayerEliminated { player_id });
+    }
+
+    // Only one token per turn
+    if state.token_played_this_turn {
+        return Err(GameError::ShiftTokenAlreadyPlayed);
+    }
+
+    // Player must own the token
+    if !current.has_token(&token) {
+        return Err(GameError::ShiftTokenNotOwned { player_id });
+    }
+
+    // Validate target for targeted tokens
+    if token.requires_target() {
+        let target_id = match &token {
+            ShiftToken::TargetTariff(t)
+            | ShiftToken::TargetAudit(t)
+            | ShiftToken::Exhaustion(t)
+            | ShiftToken::DirectTransaction(t) => *t,
+            _ => unreachable!(),
+        };
+        if target_id == player_id {
+            return Err(GameError::InvalidTokenTarget {
+                player_id,
+                reason: "cannot target yourself".into(),
+            });
+        }
+        let target = state
+            .players
+            .iter()
+            .find(|p| p.id == target_id)
+            .ok_or(GameError::PlayerNotFound {
+                player_id: target_id,
+            })?;
+        if target.is_eliminated {
+            return Err(GameError::InvalidTokenTarget {
+                player_id: target_id,
+                reason: "target is eliminated".into(),
+            });
+        }
+    }
+
+    let immune = state.modifiers.immune_players.clone();
+
+    // Apply token effect
+    match &token {
+        ShiftToken::FreeDraw => {
+            state.free_draw_active = true;
+        }
+
+        ShiftToken::Refund => {
+            let player = &state.players[state.current_player_idx];
+            if player.pot == 0 {
+                return Err(GameError::NoInvestedChips { player_id });
+            }
+            state.players[state.current_player_idx].refund_chips(2);
+        }
+
+        ShiftToken::ExtraRefund => {
+            let player = &state.players[state.current_player_idx];
+            if player.pot == 0 {
+                return Err(GameError::NoInvestedChips { player_id });
+            }
+            state.players[state.current_player_idx].refund_chips(3);
+        }
+
+        ShiftToken::GeneralTariff => {
+            for i in 0..state.players.len() {
+                let p = &state.players[i];
+                if p.id != player_id && !p.is_eliminated && !immune.contains(&p.id) {
+                    state.players[i].apply_penalty(1);
+                }
+            }
+        }
+
+        ShiftToken::TargetTariff(target_id) => {
+            let tid = *target_id;
+            if !immune.contains(&tid) {
+                if let Some(target) = state.players.iter_mut().find(|p| p.id == tid) {
+                    target.apply_penalty(2);
+                }
+            }
+        }
+
+        ShiftToken::Embezzlement => {
+            let mut stolen = 0u8;
+            for i in 0..state.players.len() {
+                let p = &state.players[i];
+                if p.id != player_id && !p.is_eliminated && !immune.contains(&p.id) && p.chips > 0
+                {
+                    state.players[i].chips -= 1;
+                    stolen += 1;
+                }
+            }
+            state.players[state.current_player_idx].chips += stolen;
+        }
+
+        ShiftToken::GeneralAudit => {
+            state.pending_audit.general = true;
+            state.pending_audit.general_source = Some(player_id);
+        }
+
+        ShiftToken::TargetAudit(target_id) => {
+            state.pending_audit.target = Some(*target_id);
+        }
+
+        ShiftToken::Markdown => {
+            state.modifiers.markdown_active = true;
+        }
+
+        ShiftToken::CookTheBooks => {
+            state.modifiers.cook_the_books_active = true;
+        }
+
+        ShiftToken::MajorFraud => {
+            state.modifiers.major_fraud_active = true;
+        }
+
+        ShiftToken::Immunity => {
+            state.modifiers.immune_players.push(player_id);
+        }
+
+        ShiftToken::PrimeSabacc => {
+            let die1: u8 = rng.gen_range(1..=6);
+            let die2: u8 = rng.gen_range(1..=6);
+
+            // Remove the token first
+            state.players[state.current_player_idx].remove_token(&token)?;
+            state.token_played_this_turn = true;
+
+            state.phase = GamePhase::PrimeSabaccChoice {
+                player_id,
+                die1,
+                die2,
+            };
+
+            // Return early since we already removed the token
+            return Ok(state);
+        }
+
+        ShiftToken::Embargo => {
+            // Find the next non-eliminated player
+            let num = state.players.len();
+            let mut next_idx = state.current_player_idx + 1;
+            let mut found = None;
+            for _ in 0..num {
+                if next_idx >= num {
+                    // Wrap around is not meaningful in same turn; just check remaining
+                    break;
+                }
+                let p = &state.players[next_idx];
+                if !p.is_eliminated {
+                    found = Some(p.id);
+                    break;
+                }
+                next_idx += 1;
+            }
+            if let Some(next_id) = found {
+                if !immune.contains(&next_id) {
+                    state.embargoed_player = Some(next_id);
+                }
+            }
+        }
+
+        ShiftToken::Exhaustion(target_id) => {
+            let tid = *target_id;
+            if !immune.contains(&tid) {
+                // Discard target's hand and redraw
+                if let Some(target) = state.players.iter_mut().find(|p| p.id == tid) {
+                    if let Some(hand) = target.hand.take() {
+                        state.sand_deck.discard(hand.sand);
+                        state.blood_deck.discard(hand.blood);
+                    }
+                }
+                // Draw new hand for target
+                let new_sand = state.sand_deck.draw(rng)?;
+                let new_blood = state.blood_deck.draw(rng)?;
+                let new_hand = crate::hand::Hand::new(new_sand, new_blood)?;
+                if let Some(target) = state.players.iter_mut().find(|p| p.id == tid) {
+                    target.hand = Some(new_hand);
+                }
+            }
+        }
+
+        ShiftToken::DirectTransaction(target_id) => {
+            let tid = *target_id;
+            if !immune.contains(&tid) {
+                let player_idx = state.current_player_idx;
+                let target_idx = state
+                    .players
+                    .iter()
+                    .position(|p| p.id == tid)
+                    .ok_or(GameError::PlayerNotFound { player_id: tid })?;
+
+                // Swap hands
+                let player_hand = state.players[player_idx].hand.take();
+                let target_hand = state.players[target_idx].hand.take();
+                state.players[player_idx].hand = target_hand;
+                state.players[target_idx].hand = player_hand;
+            }
+        }
+    }
+
+    // Remove token and mark as played
+    state.players[state.current_player_idx].remove_token(&token)?;
+    state.token_played_this_turn = true;
+
+    Ok(state)
+}
+
+/// Apply a PrimeSabacc dice choice.
+fn apply_prime_sabacc_choice(
+    mut state: GameState,
+    player_id: PlayerId,
+    chosen_value: u8,
+) -> Result<GameState, GameError> {
+    let (expected_pid, die1, die2) = match &state.phase {
+        GamePhase::PrimeSabaccChoice {
+            player_id,
+            die1,
+            die2,
+        } => (*player_id, *die1, *die2),
+        _ => {
+            return Err(GameError::InvalidActionForPhase {
+                reason: "not in PrimeSabaccChoice phase".into(),
+            });
+        }
+    };
+
+    if player_id != expected_pid {
+        return Err(GameError::NotPlayerTurn { player_id });
+    }
+
+    if chosen_value != die1 && chosen_value != die2 {
+        return Err(GameError::InvalidPrimeSabaccChoice {
+            chosen: chosen_value,
+            die1,
+            die2,
+        });
+    }
+
+    state.modifiers.prime_sabacc = Some(crate::scoring::PrimeSabaccModifier {
+        player_id,
+        chosen_value,
+    });
+
+    // Return to TurnAction phase
+    state.phase = GamePhase::TurnAction;
+
+    Ok(state)
 }
 
 /// Begin the revelation phase after turn 3.
@@ -616,6 +1108,7 @@ mod tests {
             starting_chips: 6,
             buy_in: 100,
             enable_shift_tokens: false,
+            token_distribution: TokenDistribution::None,
         }
     }
 

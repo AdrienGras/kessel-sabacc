@@ -75,6 +75,36 @@ impl Player {
     pub fn total_chips(&self) -> u8 {
         self.chips + self.pot
     }
+
+    /// Check if the player has a token of the given type.
+    pub fn has_token(&self, token: &ShiftToken) -> bool {
+        self.shift_tokens.iter().any(|t| t.matches_type(token))
+    }
+
+    /// Remove a token of the given type from the player's inventory.
+    pub fn remove_token(&mut self, token: &ShiftToken) -> Result<(), GameError> {
+        let pos = self
+            .shift_tokens
+            .iter()
+            .position(|t| t.matches_type(token));
+        match pos {
+            Some(idx) => {
+                self.shift_tokens.remove(idx);
+                Ok(())
+            }
+            None => Err(GameError::ShiftTokenNotOwned {
+                player_id: self.id,
+            }),
+        }
+    }
+
+    /// Refund chips from pot back to reserve. Returns actual amount refunded.
+    pub fn refund_chips(&mut self, amount: u8) -> u8 {
+        let refunded = amount.min(self.pot);
+        self.pot -= refunded;
+        self.chips += refunded;
+        refunded
+    }
 }
 
 #[cfg(test)]
