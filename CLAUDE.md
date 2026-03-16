@@ -511,6 +511,7 @@ pub enum GamePhase {
     ChoosingDiscard { player_id, drawn_card },  // état intermédiaire après pioche
     ImpostorReveal { pending, submitted },        // avec tracking des choix soumis
     Reveal { results },
+    PrimeSabaccChoice { player_id, die1, die2 }, // Phase 2 — choix de dé PrimeSabacc
     RoundEnd,
     GameOver { winner },
 }
