@@ -1,0 +1,12 @@
+[package]
+name = "sabacc-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core game logic for Kessel Sabacc"
+
+[dependencies]
+rand = "0.8"
+thiserror = "2"
+
+[dev-dependencies]
+rand = { version = "0.8", features = ["small_rng"] }

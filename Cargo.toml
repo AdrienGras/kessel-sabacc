@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/sabacc-core"]
+resolver = "2"
