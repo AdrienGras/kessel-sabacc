@@ -43,7 +43,7 @@ fn render_setup(frame: &mut Frame, app: &AppState) {
                 .fg(Color::Rgb(232, 192, 80))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" — Configuration", Style::default().fg(Color::White)),
+        Span::styled(" — Setup", Style::default().fg(Color::White)),
     ]))
     .block(
         Block::default()
@@ -57,7 +57,7 @@ fn render_setup(frame: &mut Frame, app: &AppState) {
 
     // Hints
     let hints = Paragraph::new(Line::from(vec![Span::styled(
-        " Tab/↑↓: naviguer  ◀▶: modifier  Enter: confirmer  Esc: quitter",
+        " Tab/↑↓: navigate  ◀▶: modify  Enter: confirm  Esc: quit",
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hints, layout[2]);
@@ -71,12 +71,12 @@ fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
     frame.render_widget(block, area);
 
     let mut fields: Vec<(&str, String)> = vec![
-        ("Nom du joueur", format!("{}_", setup.player_name)),
-        ("Nombre de bots", format!("◀ {} ▶", setup.num_bots)),
+        ("Player name", format!("{}_", setup.player_name)),
+        ("Number of bots", format!("◀ {} ▶", setup.num_bots)),
         (
             "Buy-in",
             format!(
-                "◀ {} crédits ({} jetons) ▶",
+                "◀ {} credits ({} chips) ▶",
                 setup.buy_in(),
                 setup.starting_chips()
             ),
@@ -92,13 +92,13 @@ fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
     ];
     if setup.tokens_enabled {
         fields.push((
-            "Tokens par joueur",
+            "Tokens per player",
             format!("◀ {} ▶", setup.tokens_per_player),
         ));
     } else {
-        fields.push(("Tokens par joueur", "—".into()));
+        fields.push(("Tokens per player", "—".into()));
     }
-    fields.push(("", "[ LANCER LA PARTIE ]".into()));
+    fields.push(("", "[ START GAME ]".into()));
 
     for (i, (label, value)) in fields.iter().enumerate() {
         if i as u16 * 2 >= inner.height {
@@ -154,7 +154,7 @@ fn render_playing(frame: &mut Frame, app: &AppState) {
     // Minimum size guard
     if area.width < 120 || area.height < 30 {
         let msg = format!(
-            "Terminal trop petit ({}×{})\nMinimum requis : 120×30",
+            "Terminal too small ({}×{})\nMinimum required: 120×30",
             area.width, area.height
         );
         let para = Paragraph::new(msg)
@@ -221,7 +221,7 @@ fn render_help(frame: &mut Frame) {
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(" Aide — Kessel Sabacc ")
+        .title(" Help — Kessel Sabacc ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -232,22 +232,22 @@ fn render_help(frame: &mut Frame) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  Tab/←→    Naviguer entre les actions"),
-        Line::from("  Enter     Confirmer la sélection"),
-        Line::from("  1-4       Sélection directe (source)"),
-        Line::from("  s         Jouer un ShiftToken"),
-        Line::from("  Esc       Annuler / Fermer"),
-        Line::from("  Space     Skip les animations"),
-        Line::from("  PgUp/PgDn Scroller le log"),
-        Line::from("  ?         Cette aide"),
-        Line::from("  q         Quitter"),
+        Line::from("  Tab/←→    Navigate between actions"),
+        Line::from("  Enter     Confirm selection"),
+        Line::from("  1-4       Direct source selection"),
+        Line::from("  s         Play a ShiftToken"),
+        Line::from("  Esc       Cancel / Close"),
+        Line::from("  Space     Skip animations"),
+        Line::from("  PgUp/PgDn Scroll log"),
+        Line::from("  ?         This help"),
+        Line::from("  q         Quit"),
         Line::from(""),
         Line::from(Span::styled(
-            "But: garder 2 cartes proches en valeur !",
+            "Goal: keep 2 cards close in value!",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
-            "Appuyez sur une touche pour fermer.",
+            "Press any key to close.",
             Style::default().fg(Color::DarkGray),
         )),
     ];

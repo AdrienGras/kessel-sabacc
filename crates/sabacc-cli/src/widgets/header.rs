@@ -17,8 +17,8 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
 
     let (round_str, turn_str, phase_str) = match &app.game {
         Some(g) => (
-            format!("Manche {}", g.round),
-            format!("Tour {}/3", g.turn),
+            format!("Round {}", g.round),
+            format!("Turn {}/3", g.turn),
             phase_label(&g.phase),
         ),
         None => ("—".into(), "—".into(), "Setup".into()),
@@ -47,13 +47,13 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
 
 fn phase_label(phase: &GamePhase) -> String {
     match phase {
-        GamePhase::Setup => "Préparation".into(),
+        GamePhase::Setup => "Setup".into(),
         GamePhase::TurnAction => "Action".into(),
-        GamePhase::ChoosingDiscard { .. } => "Choix de défausse".into(),
-        GamePhase::ImpostorReveal { .. } => "Révélation Imposteur".into(),
-        GamePhase::Reveal { .. } => "Révélation".into(),
+        GamePhase::ChoosingDiscard { .. } => "Discard Choice".into(),
+        GamePhase::ImpostorReveal { .. } => "Impostor Reveal".into(),
+        GamePhase::Reveal { .. } => "Reveal".into(),
         GamePhase::PrimeSabaccChoice { .. } => "Prime Sabacc".into(),
-        GamePhase::RoundEnd => "Fin de manche".into(),
-        GamePhase::GameOver { .. } => "Fin de partie".into(),
+        GamePhase::RoundEnd => "Round End".into(),
+        GamePhase::GameOver { .. } => "Game Over".into(),
     }
 }

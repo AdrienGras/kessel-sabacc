@@ -412,12 +412,12 @@ fn start_game(mut state: AppState) -> AppState {
                     state.game = Some(started);
                     state.screen = Screen::Playing;
                     state.tui.focus = Focus::ActionBar;
-                    state.push_log("Partie lancée !".into());
+                    state.push_log("Game started!".into());
                 }
-                Err(e) => state.push_error(format!("Erreur au démarrage: {e}")),
+                Err(e) => state.push_error(format!("Startup error: {e}")),
             }
         }
-        Err(e) => state.push_error(format!("Erreur de configuration: {e}")),
+        Err(e) => state.push_error(format!("Config error: {e}")),
     }
 
     state
@@ -587,7 +587,7 @@ fn update_turn_action(mut state: AppState, key: KeyEvent) -> (AppState, Command)
                         action: TurnAction::Stand,
                     },
                 );
-                state.push_log("Vous: Stand".into());
+                state.push_log("You: Stand".into());
                 if !state.is_human_turn() {
                     return (state, Command::RunBots);
                 }
@@ -641,7 +641,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             _ => {}
         },
         Some(Overlay::DiscardChoice { .. }) => match key.code {
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
+            KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
                 state.tui.selected_discard = 1 - state.tui.selected_discard;
             }
             KeyCode::Enter => {
@@ -659,9 +659,9 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     },
                 );
                 if state.tui.selected_discard == 0 {
-                    state.push_log("Vous: garde piochée".into());
+                    state.push_log("You: keep drawn".into());
                 } else {
-                    state.push_log("Vous: défausse".into());
+                    state.push_log("You: discard drawn".into());
                 }
                 if !state.is_human_turn() {
                     return (state, Command::RunBots);
@@ -705,7 +705,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                             state.tui.selected_target = 0;
                         } else {
                             state.tui.overlay = None;
-                            state.push_log(format!("Vous: {:?}", token));
+                            state.push_log(format!("You: {:?}", token));
                             state = apply_game_action(
                                 state,
                                 Action::PlayShiftToken {
@@ -755,7 +755,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                         .map_or("?".into(), |p| p.name.clone());
 
                     state.tui.overlay = None;
-                    state.push_log(format!("Vous: {:?}→{}", token, target_name));
+                    state.push_log(format!("You: {:?}→{}", token, target_name));
                     state = apply_game_action(
                         state,
                         Action::PlayShiftToken {
@@ -796,7 +796,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
 
                 state.tui.overlay = None;
                 state.tui.selected_die = 0;
-                state.push_log(format!("Imposteur→{chosen}"));
+                state.push_log(format!("Impostor→{chosen}"));
                 state = apply_game_action(state, Action::SubmitImpostorChoice(choice));
                 if !state.is_human_turn() {
                     return (state, Command::RunBots);
@@ -858,12 +858,12 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
     let source_name = match source {
         DrawSource::SandDeck => "Deck S",
         DrawSource::BloodDeck => "Deck B",
-        DrawSource::SandDiscard => "Déf S",
-        DrawSource::BloodDiscard => "Déf B",
+        DrawSource::SandDiscard => "Dis S",
+        DrawSource::BloodDiscard => "Dis B",
     };
 
     state.tui.overlay = None;
-    state.push_log(format!("Vous: Draw {source_name}"));
+    state.push_log(format!("You: Draw {source_name}"));
     state = apply_game_action(
         state,
         Action::PlayerAction {
@@ -911,12 +911,12 @@ fn apply_game_action(mut state: AppState, action: Action) -> AppState {
                 state.game = Some(new_game);
             }
             Err(e) => {
-                state.push_error(format!("Erreur: {e}"));
+                state.push_error(format!("Error: {e}"));
                 // Restore game state on error — re-create from error
                 // The game state was consumed, but we can't recover it.
                 // This is a design limitation — we should clone before.
                 // For now, log the error. The game is lost on error.
-                state.push_error("État du jeu perdu suite à une erreur.".into());
+                state.push_error("Game state lost due to error.".into());
             }
         }
     }
@@ -944,7 +944,7 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                 });
 
                 let status = if is_winner {
-                    "GAGNE".to_string()
+                    "WIN".to_string()
                 } else if result.penalty > 0 {
                     format!("-{}", result.penalty)
                 } else {
@@ -964,7 +964,7 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                     .find(|p| p.id == winner.player_id)
                     .map_or("?".into(), |p| p.name.clone());
                 state.animations.push(Animation::LogMessage {
-                    text: format!("Gagnant: {name}"),
+                    text: format!("Winner: {name}"),
                 });
             }
 
@@ -1089,7 +1089,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                         match game::apply_action(game_state, action, &mut state.rng) {
                             Ok(new_state) => {
                                 state.animations.push(Animation::LogMessage {
-                                    text: format!("{bot_name}: Imposteur"),
+                                    text: format!("{bot_name}: Impostor"),
                                 });
                                 check_phase_transitions(&mut state, &new_state);
                                 state.game = Some(new_state);
@@ -1188,8 +1188,8 @@ fn describe_action(action: &Action, _game: &GameState) -> String {
                 let source_name = match source {
                     DrawSource::SandDeck => "Deck S",
                     DrawSource::BloodDeck => "Deck B",
-                    DrawSource::SandDiscard => "Déf S",
-                    DrawSource::BloodDiscard => "Déf B",
+                    DrawSource::SandDiscard => "Dis S",
+                    DrawSource::BloodDiscard => "Dis B",
                 };
                 format!("Draw {source_name}")
             }

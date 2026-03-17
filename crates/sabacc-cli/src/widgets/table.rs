@@ -1,4 +1,4 @@
-/// Table center — 4 cards horizontal: Déf Sand | Deck Sand | Deck Blood | Déf Blood.
+/// Table center — 4 cards horizontal: Discard Sand | Deck Sand | Deck Blood | Discard Blood.
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -15,7 +15,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     };
 
     let block = Block::default()
-        .title(" TABLE DE JEU ")
+        .title(" GAME TABLE ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
         .title_style(Style::default().fg(SAND_COLOR).add_modifier(Modifier::BOLD));
@@ -43,17 +43,17 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     let card_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(8), // Déf Sand
+            Constraint::Length(8), // Discard Sand
             Constraint::Length(2), // spacer
             Constraint::Length(8), // Deck Sand
             Constraint::Length(4), // spacer (family separation)
             Constraint::Length(8), // Deck Blood
             Constraint::Length(2), // spacer
-            Constraint::Length(8), // Déf Blood
+            Constraint::Length(8), // Discard Blood
         ])
         .split(cards_area);
 
-    // Déf Sand
+    // Discard Sand
     if let Some(top) = game.sand_deck.peek_discard() {
         CardWidget::from_card(top, false).render(card_cols[0], buf);
     } else {
@@ -66,7 +66,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     // Deck Blood
     CardWidget::face_down().render(card_cols[4], buf);
 
-    // Déf Blood
+    // Discard Blood
     if let Some(top) = game.blood_deck.peek_discard() {
         CardWidget::from_card(top, false).render(card_cols[6], buf);
     } else {
@@ -79,7 +79,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         buf.set_string(
             card_cols[0].x,
             label_y,
-            "Déf Sand",
+            "Dis Sand",
             Style::default().fg(SAND_COLOR),
         );
         buf.set_string(
@@ -97,7 +97,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         buf.set_string(
             card_cols[6].x,
             label_y,
-            "Déf Blood",
+            "Dis Blood",
             Style::default().fg(BLOOD_COLOR),
         );
     }
@@ -111,7 +111,7 @@ fn render_empty_slot(area: Rect, buf: &mut Buffer, color: Color) {
     let dim = Style::default().fg(Color::DarkGray);
     buf.set_string(area.x, area.y, "┌──────┐", dim);
     buf.set_string(area.x, area.y + 1, "│      │", dim);
-    buf.set_string(area.x, area.y + 2, "│ vide │", style);
+    buf.set_string(area.x, area.y + 2, "│ empty│", style);
     buf.set_string(area.x, area.y + 3, "│      │", dim);
     buf.set_string(area.x, area.y + 4, "└──────┘", dim);
 }

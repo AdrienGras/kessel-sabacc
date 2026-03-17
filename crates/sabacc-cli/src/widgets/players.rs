@@ -11,7 +11,7 @@ use crate::app::AppState;
 /// Renders the players panel in 3-line-per-player format.
 pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     let block = Block::default()
-        .title(" JOUEURS ")
+        .title(" PLAYERS ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
 
@@ -118,7 +118,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         }
 
         // Line 3: detail text
-        let detail = format!("  {} rés. + {} pot", player.chips, player.pot);
+        let detail = format!("  {} res. + {} pot", player.chips, player.pot);
         buf.set_string(inner.x, y, &detail, Style::default().fg(Color::DarkGray));
         y += 1;
 

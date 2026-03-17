@@ -21,7 +21,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     };
 
     let block = Block::default()
-        .title(" VOTRE MAIN ")
+        .title(" YOUR HAND ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
         .title_style(Style::default().fg(SAND_COLOR).add_modifier(Modifier::BOLD));
@@ -69,7 +69,7 @@ fn render_chips(area: Rect, buf: &mut Buffer, player: &sabacc_core::player::Play
     y += 1;
 
     if y < area.bottom() {
-        let detail = format!("{} rés. + {} pot", player.chips, player.pot);
+        let detail = format!("{} res. + {} pot", player.chips, player.pot);
         buf.set_string(area.x + 1, y, &detail, Style::default().fg(Color::DarkGray));
     }
 }
@@ -124,7 +124,7 @@ fn render_tokens(area: Rect, buf: &mut Buffer, player: &sabacc_core::player::Pla
     }
 
     if player.shift_tokens.is_empty() {
-        buf.set_string(area.x, y, "(aucun)", Style::default().fg(Color::DarkGray));
+        buf.set_string(area.x, y, "(none)", Style::default().fg(Color::DarkGray));
         return;
     }
 
@@ -199,21 +199,21 @@ fn token_name(token: &sabacc_core::shift_token::ShiftToken) -> String {
 fn token_description(token: &sabacc_core::shift_token::ShiftToken) -> String {
     use sabacc_core::shift_token::ShiftToken;
     match token {
-        ShiftToken::FreeDraw => "Piocher sans payer".into(),
-        ShiftToken::Refund => "Récupérer 2 jetons".into(),
-        ShiftToken::ExtraRefund => "Récupérer 3 jetons".into(),
-        ShiftToken::GeneralTariff => "Tous paient 1 jeton".into(),
-        ShiftToken::TargetTariff(_) => "Ciblé paie 2 jetons".into(),
-        ShiftToken::Embargo => "Suivant doit Stand".into(),
-        ShiftToken::Markdown => "Sylop vaut 0".into(),
-        ShiftToken::Immunity => "Immunité tokens".into(),
-        ShiftToken::GeneralAudit => "Stand paient 2 jetons".into(),
-        ShiftToken::TargetAudit(_) => "Ciblé Stand paie 3".into(),
-        ShiftToken::MajorFraud => "Imposteur fixé à 6".into(),
-        ShiftToken::Embezzlement => "1 jeton par adversaire".into(),
-        ShiftToken::CookTheBooks => "Inverse classement".into(),
-        ShiftToken::Exhaustion(_) => "Ciblé repioche main".into(),
-        ShiftToken::DirectTransaction(_) => "Échange main ciblé".into(),
-        ShiftToken::PrimeSabacc => "Dés → meilleur Sabacc".into(),
+        ShiftToken::FreeDraw => "Free draw".into(),
+        ShiftToken::Refund => "Recover 2 chips".into(),
+        ShiftToken::ExtraRefund => "Recover 3 chips".into(),
+        ShiftToken::GeneralTariff => "All pay 1 chip".into(),
+        ShiftToken::TargetTariff(_) => "Target pays 2 chips".into(),
+        ShiftToken::Embargo => "Next must Stand".into(),
+        ShiftToken::Markdown => "Sylop = 0".into(),
+        ShiftToken::Immunity => "Token immunity".into(),
+        ShiftToken::GeneralAudit => "Standing pay 2 chips".into(),
+        ShiftToken::TargetAudit(_) => "Target standing pays 3".into(),
+        ShiftToken::MajorFraud => "Impostor locked at 6".into(),
+        ShiftToken::Embezzlement => "1 chip per opponent".into(),
+        ShiftToken::CookTheBooks => "Reverse ranking".into(),
+        ShiftToken::Exhaustion(_) => "Target redraws hand".into(),
+        ShiftToken::DirectTransaction(_) => "Swap hand w/ target".into(),
+        ShiftToken::PrimeSabacc => "Dice → best Sabacc".into(),
     }
 }

@@ -757,6 +757,26 @@ Le `render_bar` doit avoir un cas explicite pour chaque `GamePhase` :
 `PrimeSabaccChoice`, `ChoosingDiscard`. Si un variant tombe dans `_ => {}`,
 l'utilisateur voit une action bar vide et pense que le jeu est figé.
 
+### Token descriptions dupliquées : actions.rs (long) et hand.rs (short)
+
+Les descriptions de ShiftTokens existent en **2 copies** :
+- `widgets/actions.rs::token_description()` → version longue pour le popup overlay
+- `widgets/hand.rs::token_description()` → version courte pour la sidebar (colonne étroite)
+
+Lors de toute modification de texte de token, penser à mettre à jour les deux.
+
+### Labels de table : 8 chars max
+
+Les labels sous les cartes de la table ("Dis Sand", "Deck(N)", "Dis Blood") sont
+limités à **8 caractères** par la largeur des colonnes de cartes. Utiliser des
+abréviations : "Dis" (Discard), "Deck" (Draw pile).
+
+### UI language : English
+
+Depuis v0.5.0, toute l'interface du jeu est en anglais. Les messages de log, les
+overlays, les labels, les descriptions de tokens, l'écran de setup et l'aide sont
+en anglais. Maintenir cette cohérence pour tout nouveau texte ajouté.
+
 ### Log : word-wrap + préfixe `›` pour distinguer les messages
 
 Pour un log dans une colonne étroite, ne pas tronquer — wrapper intelligemment.

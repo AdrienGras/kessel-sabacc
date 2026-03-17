@@ -35,14 +35,14 @@ pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
         }
         GamePhase::TurnAction => {
             let line = Line::from(vec![Span::styled(
-                "En attente des bots...",
+                "Waiting for bots...",
                 Style::default().fg(Color::DarkGray),
             )]);
             buf.set_line(inner.x, inner.y, &line, inner.width);
         }
         GamePhase::Reveal { .. } | GamePhase::RoundEnd => {
             let line = Line::from(vec![Span::styled(
-                "[Enter] Continuer",
+                "[Enter] Continue",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -51,25 +51,25 @@ pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
         }
         GamePhase::ImpostorReveal { pending, .. } => {
             let msg = if pending.contains(&0u8) {
-                "Imposteur ! Choisissez une valeur de dé..."
+                "Impostor! Choose a die value..."
             } else {
-                "Résolution des Imposteurs..."
+                "Resolving Impostors..."
             };
             let line = Line::from(vec![Span::styled(msg, Style::default().fg(Color::Magenta))]);
             buf.set_line(inner.x, inner.y, &line, inner.width);
         }
         GamePhase::PrimeSabaccChoice { player_id, .. } => {
             let msg = if *player_id == 0 {
-                "Prime Sabacc ! Choisissez une valeur..."
+                "Prime Sabacc! Choose a value..."
             } else {
-                "Résolution Prime Sabacc..."
+                "Resolving Prime Sabacc..."
             };
             let line = Line::from(vec![Span::styled(msg, Style::default().fg(Color::Magenta))]);
             buf.set_line(inner.x, inner.y, &line, inner.width);
         }
         GamePhase::ChoosingDiscard { .. } => {
             let line = Line::from(vec![Span::styled(
-                "Choisissez quelle carte garder...",
+                "Choose which card to keep...",
                 Style::default().fg(Color::Cyan),
             )]);
             buf.set_line(inner.x, inner.y, &line, inner.width);
@@ -77,10 +77,10 @@ pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
         GamePhase::GameOver { .. } => {
             let line = Line::from(vec![
                 Span::styled(
-                    "[Enter] Nouvelle partie  ",
+                    "[Enter] New game  ",
                     Style::default().fg(Color::Yellow),
                 ),
-                Span::styled("[q] Quitter", Style::default().fg(Color::DarkGray)),
+                Span::styled("[q] Quit", Style::default().fg(Color::DarkGray)),
             ]);
             buf.set_line(inner.x, inner.y, &line, inner.width);
         }
@@ -135,7 +135,7 @@ fn render_action_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
     // Hint line
     if area.height > 1 {
         let hint = Line::from(Span::styled(
-            "Tab: naviguer · Enter: confirmer · ?: aide",
+            "Tab: navigate · Enter: confirm · ?: help",
             Style::default().fg(Color::DarkGray),
         ));
         buf.set_line(area.x, area.y + 1, &hint, area.width);
@@ -153,14 +153,14 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let popup = centered_popup(area, 30, 5);
             Clear.render(popup, buf);
             let block = Block::default()
-                .title(" Quitter ? ")
+                .title(" Quit? ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red));
             let inner = block.inner(popup);
             block.render(popup, buf);
             let line = Line::from(vec![
-                Span::styled("[y] Oui  ", Style::default().fg(Color::Red)),
-                Span::styled("[n] Non", Style::default().fg(Color::Green)),
+                Span::styled("[y] Yes  ", Style::default().fg(Color::Red)),
+                Span::styled("[n] No", Style::default().fg(Color::Green)),
             ]);
             buf.set_line(inner.x, inner.y + 1, &line, inner.width);
         }
@@ -168,7 +168,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let popup = centered_popup(area, 36, 8);
             Clear.render(popup, buf);
             let block = Block::default()
-                .title(" Choisir la source ")
+                .title(" Choose source ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Yellow));
             let inner = block.inner(popup);
@@ -177,8 +177,8 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let sources = [
                 "1. Deck Sand",
                 "2. Deck Blood",
-                "3. Défausse Sand",
-                "4. Défausse Blood",
+                "3. Discard Sand",
+                "4. Discard Blood",
             ];
             let colors = [
                 super::card::SAND_COLOR,
@@ -208,7 +208,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let popup = centered_popup(area, 46, 11);
             Clear.render(popup, buf);
             let block = Block::default()
-                .title(" Garder ou Défausser ? ")
+                .title(" Keep or Discard? ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan));
             let inner = block.inner(popup);
@@ -221,10 +221,10 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
 
             // Show both cards
             let header = Line::from(vec![
-                Span::styled("Piochée: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Drawn: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(&drawn_str, Style::default().fg(drawn_color)),
                 Span::raw("   "),
-                Span::styled("En main: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("In hand: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(&current_str, Style::default().fg(current_color)),
             ]);
             buf.set_line(inner.x, inner.y, &header, inner.width);
@@ -241,8 +241,8 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
 
             // Options with card previews
             let options = [
-                format!("Garder {}  (défausse {})", drawn_str, current_str),
-                format!("Garder {}  (défausse {})", current_str, drawn_str),
+                format!("Keep {}  (discard {})", drawn_str, current_str),
+                format!("Keep {}  (discard {})", current_str, drawn_str),
             ];
             for (i, opt) in options.iter().enumerate() {
                 let selected = i == app.tui.selected_discard;
@@ -266,7 +266,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 buf.set_string(
                     inner.x,
                     inner.y + inner.height - 1,
-                    "Tab: basculer  Enter: confirmer",
+                    "Tab: switch  Enter: confirm",
                     Style::default().fg(Color::DarkGray),
                 );
             }
@@ -336,7 +336,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let popup = centered_popup(area, 36, h);
             Clear.render(popup, buf);
             let block = Block::default()
-                .title(format!(" Cibler — {:?} ", token))
+                .title(format!(" Target — {:?} ", token))
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red));
             let inner = block.inner(popup);
@@ -362,8 +362,8 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
         }
         Overlay::ImpostorChoice { die1, die2, .. } | Overlay::PrimeSabaccChoice { die1, die2 } => {
             let title = match overlay {
-                Overlay::ImpostorChoice { .. } => " Imposteur — Choisir un dé ",
-                _ => " Prime Sabacc — Choisir un dé ",
+                Overlay::ImpostorChoice { .. } => " Impostor — Choose a die ",
+                _ => " Prime Sabacc — Choose a die ",
             };
             let popup = centered_popup(area, 34, 7);
             Clear.render(popup, buf);
@@ -376,7 +376,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
 
             let d1 = *die1;
             let d2 = *die2;
-            let options = [format!("Dé 1: {d1}"), format!("Dé 2: {d2}")];
+            let options = [format!("Die 1: {d1}"), format!("Die 2: {d2}")];
             for (i, opt) in options.iter().enumerate() {
                 let selected = i == app.tui.selected_die;
                 let style = if selected {
@@ -402,22 +402,22 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             Clear.render(popup, buf);
             let color = if *is_human { Color::Yellow } else { Color::Red };
             let block = Block::default()
-                .title(" Fin de Partie ")
+                .title(" Game Over ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(color));
             let inner = block.inner(popup);
             block.render(popup, buf);
 
             let msg = if *is_human {
-                "Victoire ! Vous remportez le pot !".to_string()
+                "Victory! You win the pot!".to_string()
             } else {
-                format!("{winner_name} remporte la partie.")
+                format!("{winner_name} wins the game.")
             };
 
             let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
             buf.set_string(inner.x + 1, inner.y + 1, &msg, style);
 
-            let hint = "[Enter] Nouvelle partie  [q] Quitter";
+            let hint = "[Enter] New game  [q] Quit";
             buf.set_string(
                 inner.x + 1,
                 inner.y + 3,
@@ -462,21 +462,21 @@ fn token_name(token: &ShiftToken) -> String {
 /// Returns a short description for a shift token.
 fn token_description(token: &ShiftToken) -> String {
     match token {
-        ShiftToken::FreeDraw => "Piocher sans payer 1 jeton".into(),
-        ShiftToken::Refund => "Récupérer 2 jetons investis".into(),
-        ShiftToken::ExtraRefund => "Récupérer 3 jetons investis".into(),
-        ShiftToken::GeneralTariff => "Tous les autres paient 1 jeton".into(),
-        ShiftToken::TargetTariff(_) => "Un joueur ciblé paie 2 jetons".into(),
-        ShiftToken::Embargo => "Le joueur suivant doit Stand".into(),
-        ShiftToken::Markdown => "Sylop vaut 0 (ne match plus)".into(),
-        ShiftToken::Immunity => "Immunité aux tokens adverses".into(),
-        ShiftToken::GeneralAudit => "Joueurs en Stand paient 2 jetons".into(),
-        ShiftToken::TargetAudit(_) => "Ciblé en Stand paie 3 jetons".into(),
-        ShiftToken::MajorFraud => "Imposteur fixé à 6".into(),
-        ShiftToken::Embezzlement => "Prendre 1 jeton à chaque adversaire".into(),
-        ShiftToken::CookTheBooks => "Inverse le classement Sabacc".into(),
-        ShiftToken::Exhaustion(_) => "Ciblé repioche une nouvelle main".into(),
-        ShiftToken::DirectTransaction(_) => "Échanger sa main avec un ciblé".into(),
-        ShiftToken::PrimeSabacc => "Dés → valeur = meilleur Sabacc".into(),
+        ShiftToken::FreeDraw => "Draw without paying 1 chip".into(),
+        ShiftToken::Refund => "Recover 2 invested chips".into(),
+        ShiftToken::ExtraRefund => "Recover 3 invested chips".into(),
+        ShiftToken::GeneralTariff => "All others pay 1 chip".into(),
+        ShiftToken::TargetTariff(_) => "Targeted player pays 2 chips".into(),
+        ShiftToken::Embargo => "Next player must Stand".into(),
+        ShiftToken::Markdown => "Sylop = 0 (no match)".into(),
+        ShiftToken::Immunity => "Immune to opponent tokens".into(),
+        ShiftToken::GeneralAudit => "Standing players pay 2 chips".into(),
+        ShiftToken::TargetAudit(_) => "Targeted standing pays 3 chips".into(),
+        ShiftToken::MajorFraud => "Impostor locked at 6".into(),
+        ShiftToken::Embezzlement => "Take 1 chip from each opponent".into(),
+        ShiftToken::CookTheBooks => "Reverse Sabacc ranking".into(),
+        ShiftToken::Exhaustion(_) => "Target redraws a new hand".into(),
+        ShiftToken::DirectTransaction(_) => "Swap hand with target".into(),
+        ShiftToken::PrimeSabacc => "Dice → value = best Sabacc".into(),
     }
 }
