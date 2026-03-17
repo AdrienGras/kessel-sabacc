@@ -316,28 +316,32 @@ loop {
 dialogue actif, animation en cours). `app.update()` est une fonction pure :
 `AppState → Event → AppState`.
 
-### Layout recommandé
+### Layout V2 — 3 colonnes (min 120×30)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  KESSEL SABACC              Manche 2 · Tour 1/3             │
-├──────────────────┬──────────────────┬───────────────────────┤
-│  Joueur 1  ●●●●  │  Joueur 2  ●●○○  │  Joueur 3  ●○○○       │
-│  [SAND: 3][BLD:?]│  [SAND: 1][BLD:1]│  [SAND:5][BLD:2]      │
-├──────────────────┴──────────────────┴───────────────────────┤
-│                    Table                                     │
-│          [SAND ▲]   [BLOOD ▲]   ← paquets                  │
-│          [SAND: 4]  [BLOOD: 2]  ← défausses                 │
-├─────────────────────────────────────────────────────────────┤
-│  Votre main : [SAND: 3] [BLOOD: ?]   Jetons: ●●●○           │
-│  ShiftTokens: [FreeDraw] [Immunity]                          │
-│  > [DRAW] [STAND]                                           │
-└─────────────────────────────────────────────────────────────┘
-│  Log: Joueur 2 a pioché une carte Blood.                     │
-└─────────────────────────────────────────────────────────────┘
+┌─ Header ─────────────────────────────────────────────────────────────────────────────────┐
+├──────────────────┬────────────────────────────────────────────────────┬───────────────────┤
+│ JOUEURS (22ch)   │ TABLE DE JEU (flexible, min 60ch)                 │ LOG (27ch)        │
+│                  │   Déf Sand  Deck Sand  Deck Blood  Déf Blood      │ (scrollable)      │
+│ ▶ Vous           │   [card]    [card]     [card]      [card]          │                   │
+│   ●●●●●○○        │                                                    │                   │
+│   5 rés. + 2 pot │ ACTIONS                                           │                   │
+│                  │   [Draw] [Stand] [Token (s)]                      │                   │
+│   Lando          │                                                    │                   │
+│   ●●●○○          │ VOTRE MAIN                                        │                   │
+│   3 rés. + 2 pot │   ●●●●●○○    [Sand][Blood]    SHIFT TOKENS       │                   │
+│                  │   5r+2p       [card][card]      FreeDraw           │                   │
+│                  │                                  — Piocher gratuit │                   │
+├──────────────────┴────────────────────────────────────────────────────┴───────────────────┤
 ```
 
-Les cartes sont rendues en blocs ASCII avec bordures Unicode et couleurs :
+- Col 1 (JOUEURS) : 3 lignes/joueur (nom, ●○, détail), éliminés compactés si nécessaire
+- Col 2 (JEU) : 3 blocs bordés — Tapis (expand, cartes centrées), Actions (fixe), Main (fixe bas, 3 sous-colonnes 1/3 : jetons | cartes | tokens)
+- Col 3 (LOG) : scrollable PageUp/PageDown, troncature `…`, auto-scroll
+- Pas de mode compact — message d'erreur si terminal < 120×30
+- Overlays rendus sur `frame.area()` entier, centrés
+
+Les cartes sont rendues en blocs ASCII 8×5 avec bordures Unicode et couleurs :
 - Sand → `Color::Rgb(232, 192, 80)` (ambre chaud)
 - Blood → `Color::Rgb(232, 72, 72)` (rouge sang)
 - Sylop → `Color::Rgb(144, 144, 224)` (violet)
@@ -345,14 +349,16 @@ Les cartes sont rendues en blocs ASCII avec bordures Unicode et couleurs :
 
 ### Interactions clavier
 
-| Touche  | Action                           |
-| ------- | -------------------------------- |
-| `Tab`   | Naviguer entre les actions       |
-| `Enter` | Confirmer l'action sélectionnée  |
-| `1`–`4` | Sélectionner la source de pioche |
-| `s`     | Jouer un ShiftToken              |
-| `q`     | Quitter                          |
-| `?`     | Aide / règles                    |
+| Touche      | Action                           |
+| ----------- | -------------------------------- |
+| `Tab`       | Naviguer entre les actions       |
+| `Enter`     | Confirmer l'action sélectionnée  |
+| `1`–`4`     | Sélectionner la source de pioche |
+| `s`         | Jouer un ShiftToken              |
+| `PageUp/Dn` | Scroller le log                 |
+| `Space`     | Skip les animations              |
+| `q`         | Quitter (avec confirmation)      |
+| `?`         | Aide / règles                    |
 
 ---
 
@@ -591,6 +597,74 @@ pas en fin de manche. Le source du GeneralAudit est exclu de son propre effet.
 
 ---
 
+## Décisions d'implémentation (Phase 3 — TUI sabacc-cli)
+
+### Architecture TUI (Elm / TEA)
+
+| Sujet | Décision | Raison |
+|-------|----------|--------|
+| Pattern | `update(state, event) → (state, Command)` pur | Testable, pas de side-effects dans la logique |
+| Side-effects | `Command::RunBots` déclenché par le main loop | Sépare les effets (bots) de la logique pure |
+| Bots | Boucle manuelle 1 bot à la fois (pas `advance_bots`) | Permet de logger chaque bot individuellement |
+| Overlays | Rendus sur `frame.area()` entier, pas dans un sous-pane | Évite le clipping dans les petites zones |
+| Log scroll | `log_scroll_offset` (offset depuis le bas), PageUp/PageDown | Convention "offset from bottom" avec auto-scroll |
+| Min terminal | 120×30, message d'erreur si trop petit | Pas de mode compact — simplifie le code |
+
+### Layout V2 — Contraintes Ratatui
+
+```rust
+// 3 colonnes
+Layout::horizontal([Length(22), Min(60), Length(27)])
+// Centre : tapis (expand) + actions (fixe) + main (fixe bas)
+Layout::vertical([Min(9), Length(5), Length(10)])
+// Main : 3 sous-colonnes égales
+Layout::horizontal([Ratio(1,3), Ratio(1,3), Ratio(1,3)])
+```
+
+### Structure des fichiers sabacc-cli
+
+```
+crates/sabacc-cli/src/
+├── main.rs          # terminal setup, panic hook, clap args, main loop
+├── app.rs           # AppState, TuiState, update(), Command, run_bots()
+├── animation.rs     # Animation queue, tick, skip
+├── events.rs        # crossterm → AppEvent (Key/Tick/Resize)
+├── ui.rs            # render() dispatch, setup screen, 3-col layout, help
+└── widgets/
+    ├── mod.rs
+    ├── card.rs      # CardWidget ASCII 8×5 + inline [S△3]
+    ├── header.rs    # Titre + manche/tour/phase
+    ├── players.rs   # 3 lignes/joueur, compact éliminés, +N... troncature
+    ├── table.rs     # 4 cartes horizontales centrées + labels
+    ├── actions.rs   # ActionBar bordée + 7 overlays (source, discard, token, target, dés, quit, gameover)
+    ├── hand.rs      # 3 colonnes 1/3 : jetons ●○ | cartes centrées | tokens liste
+    └── log.rs       # Scroll PageUp/PageDown, word-wrap, préfixe ›, indicateur ▼ new
+```
+
+### Dépendances
+
+```toml
+sabacc-core = { path = "../sabacc-core" }
+ratatui = { version = "0.29", features = ["crossterm"] }
+crossterm = "0.28"
+rand = { version = "0.8", features = ["small_rng"] }
+clap = { version = "4", features = ["derive"] }
+```
+
+### CLI args (clap)
+
+```
+sabacc-cli                           # menu interactif
+sabacc-cli --quick                   # 3 bots, 100cr, tokens on
+sabacc-cli --bots 2 --buy-in 50     # skip menu
+sabacc-cli --name "Lando"            # nom custom
+sabacc-cli --no-tokens               # désactive ShiftTokens
+```
+
+### Tests : 8 tests CLI + 96 tests core
+
+---
+
 ## Lessons learned
 
 ### Commitizen + Cargo workspaces
@@ -613,6 +687,83 @@ Seules les cartes distribuées aux joueurs réduisent le total.
 
 Clippy est strict sur les `mut` inutiles et les imports non utilisés dans les
 modules de test. Toujours vérifier clippy après compilation mais avant commit.
+
+### Overlays doivent être rendus sur frame.area() entier
+
+Les overlays (popups) doivent être rendus sur la zone complète du terminal, pas
+dans un sous-pane comme l'action bar. Sinon ils sont clippés à la taille du pane
+(3 lignes) et invisibles. Bug découvert dès la première session de test.
+
+### advance_bots() joue TOUS les bots d'un coup
+
+La fonction `advance_bots()` du core boucle en interne jusqu'au tour d'un humain.
+Si on veut logger chaque bot individuellement, il faut boucler manuellement avec
+`BotStrategy::choose_action()` + `apply_action()` un bot à la fois.
+
+### GameState est consommé par apply_action()
+
+`apply_action(state, action, rng)` consomme `state`. Si l'action échoue, l'état
+est perdu. Solution : `.take()` + `.clone()` avant si on veut pouvoir retry,
+ou accepter la perte et logguer l'erreur.
+
+### rand small_rng feature
+
+`SmallRng` nécessite la feature `small_rng` dans `rand = { version = "0.8",
+features = ["small_rng"] }`. Sans elle, l'import compile pas.
+
+### Layout TUI : centrer les éléments dans les panes expansibles
+
+Quand un pane utilise `Min(N)` et prend tout l'espace disponible, les éléments à
+l'intérieur (cartes, texte) doivent être centrés horizontalement et verticalement
+avec des offsets calculés : `offset = (available - content) / 2`.
+
+### Bordures Ratatui : compter +2 pour la hauteur
+
+Quand on utilise `Block::default().borders(Borders::ALL)`, l'inner area perd 2
+lignes (top+bottom) et 2 colonnes. Ajuster les `Constraint::Length()` en
+conséquence.
+
+### Tokens overflow : mode compact adaptatif
+
+Si les shift tokens ne tiennent pas en 2 lignes/token (nom + desc), basculer
+automatiquement en 1 ligne/token (nom — desc sur la même ligne).
+
+### Messages de log concis pour colonne étroite
+
+La colonne log fait ~23 chars utiles. Les messages doivent être abrégés :
+"Draw Deck S" au lieu de "pioche depuis Deck Sand". Le log fait du word-wrap
+avec préfixe `›` pour le premier segment et indentation `  ` pour les suivants.
+
+### ImpostorReveal / PrimeSabaccChoice : ne PAS utiliser is_human_turn()
+
+`is_human_turn()` vérifie `current_player_idx` (le tour de jeu), pas qui a un
+imposteur ni qui doit choisir pour PrimeSabacc. Ces phases ont leur propre logique :
+- `ImpostorReveal` → vérifier si `pending.contains(&human_id)`
+- `PrimeSabaccChoice` → vérifier si `player_id == 0`
+Si la condition est fausse → `Command::RunBots` pour que les bots résolvent.
+Le tick handler doit aussi relancer les bots pour ces phases, pas seulement
+`TurnAction`. Bug de freeze si oublié.
+
+### Tous les overlays doivent supporter ↑↓ en plus de Tab
+
+Les overlays de sélection (dés, sources, tokens) doivent accepter `KeyCode::Up`
+et `KeyCode::Down` en plus de `Tab`/`Left`/`Right`. L'utilisateur s'attend à ce
+que les flèches fonctionnent partout.
+
+### Action bar : afficher un message pour CHAQUE GamePhase
+
+Le `render_bar` doit avoir un cas explicite pour chaque `GamePhase` :
+`TurnAction`, `Reveal`, `RoundEnd`, `GameOver`, `ImpostorReveal`,
+`PrimeSabaccChoice`, `ChoosingDiscard`. Si un variant tombe dans `_ => {}`,
+l'utilisateur voit une action bar vide et pense que le jeu est figé.
+
+### Log : word-wrap + préfixe `›` pour distinguer les messages
+
+Pour un log dans une colonne étroite, ne pas tronquer — wrapper intelligemment.
+Utiliser un symbole (`›`) en début de chaque nouveau message et indenter les
+lignes de continuation. Le split se fait aux espaces (ou hard-break si un mot
+est trop long). Compter les **chars** pas les **bytes** pour les largeurs
+(UTF-8 multi-bytes comme `é`, `→`, `●`).
 
 ---
 
@@ -672,3 +823,137 @@ git branch -d feat/<feature-name>
 | 🔧 | chore | Configuration, tooling |
 | 🔖 | bump | Changement de version |
 | 🎉 | init | Commit initial |
+
+<!-- rtk-instructions v2 -->
+# RTK (Rust Token Killer) - Token-Optimized Commands
+
+## Golden Rule
+
+**Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
+
+**Important**: Even in command chains with `&&`, use `rtk`:
+```bash
+# ❌ Wrong
+git add . && git commit -m "msg" && git push
+
+# ✅ Correct
+rtk git add . && rtk git commit -m "msg" && rtk git push
+```
+
+## RTK Commands by Workflow
+
+### Build & Compile (80-90% savings)
+```bash
+rtk cargo build         # Cargo build output
+rtk cargo check         # Cargo check output
+rtk cargo clippy        # Clippy warnings grouped by file (80%)
+rtk tsc                 # TypeScript errors grouped by file/code (83%)
+rtk lint                # ESLint/Biome violations grouped (84%)
+rtk prettier --check    # Files needing format only (70%)
+rtk next build          # Next.js build with route metrics (87%)
+```
+
+### Test (90-99% savings)
+```bash
+rtk cargo test          # Cargo test failures only (90%)
+rtk vitest run          # Vitest failures only (99.5%)
+rtk playwright test     # Playwright failures only (94%)
+rtk test <cmd>          # Generic test wrapper - failures only
+```
+
+### Git (59-80% savings)
+```bash
+rtk git status          # Compact status
+rtk git log             # Compact log (works with all git flags)
+rtk git diff            # Compact diff (80%)
+rtk git show            # Compact show (80%)
+rtk git add             # Ultra-compact confirmations (59%)
+rtk git commit          # Ultra-compact confirmations (59%)
+rtk git push            # Ultra-compact confirmations
+rtk git pull            # Ultra-compact confirmations
+rtk git branch          # Compact branch list
+rtk git fetch           # Compact fetch
+rtk git stash           # Compact stash
+rtk git worktree        # Compact worktree
+```
+
+Note: Git passthrough works for ALL subcommands, even those not explicitly listed.
+
+### GitHub (26-87% savings)
+```bash
+rtk gh pr view <num>    # Compact PR view (87%)
+rtk gh pr checks        # Compact PR checks (79%)
+rtk gh run list         # Compact workflow runs (82%)
+rtk gh issue list       # Compact issue list (80%)
+rtk gh api              # Compact API responses (26%)
+```
+
+### JavaScript/TypeScript Tooling (70-90% savings)
+```bash
+rtk pnpm list           # Compact dependency tree (70%)
+rtk pnpm outdated       # Compact outdated packages (80%)
+rtk pnpm install        # Compact install output (90%)
+rtk npm run <script>    # Compact npm script output
+rtk npx <cmd>           # Compact npx command output
+rtk prisma              # Prisma without ASCII art (88%)
+```
+
+### Files & Search (60-75% savings)
+```bash
+rtk ls <path>           # Tree format, compact (65%)
+rtk read <file>         # Code reading with filtering (60%)
+rtk grep <pattern>      # Search grouped by file (75%)
+rtk find <pattern>      # Find grouped by directory (70%)
+```
+
+### Analysis & Debug (70-90% savings)
+```bash
+rtk err <cmd>           # Filter errors only from any command
+rtk log <file>          # Deduplicated logs with counts
+rtk json <file>         # JSON structure without values
+rtk deps                # Dependency overview
+rtk env                 # Environment variables compact
+rtk summary <cmd>       # Smart summary of command output
+rtk diff                # Ultra-compact diffs
+```
+
+### Infrastructure (85% savings)
+```bash
+rtk docker ps           # Compact container list
+rtk docker images       # Compact image list
+rtk docker logs <c>     # Deduplicated logs
+rtk kubectl get         # Compact resource list
+rtk kubectl logs        # Deduplicated pod logs
+```
+
+### Network (65-70% savings)
+```bash
+rtk curl <url>          # Compact HTTP responses (70%)
+rtk wget <url>          # Compact download output (65%)
+```
+
+### Meta Commands
+```bash
+rtk gain                # View token savings statistics
+rtk gain --history      # View command history with savings
+rtk discover            # Analyze Claude Code sessions for missed RTK usage
+rtk proxy <cmd>         # Run command without filtering (for debugging)
+rtk init                # Add RTK instructions to CLAUDE.md
+rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
+```
+
+## Token Savings Overview
+
+| Category | Commands | Typical Savings |
+|----------|----------|-----------------|
+| Tests | vitest, playwright, cargo test | 90-99% |
+| Build | next, tsc, lint, prettier | 70-87% |
+| Git | status, log, diff, add, commit | 59-80% |
+| GitHub | gh pr, gh run, gh issue | 26-87% |
+| Package Managers | pnpm, npm, npx | 70-90% |
+| Files | ls, read, grep, find | 60-75% |
+| Infrastructure | docker, kubectl | 85% |
+| Network | curl, wget | 65-70% |
+
+Overall average: **60-90% token reduction** on common development operations.
+<!-- /rtk-instructions -->

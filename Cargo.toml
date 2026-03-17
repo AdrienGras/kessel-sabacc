@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sabacc-core"]
+members = ["crates/sabacc-core", "crates/sabacc-cli"]
 resolver = "2"
 
 [workspace.package]

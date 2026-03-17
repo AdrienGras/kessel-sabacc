@@ -1,0 +1,12 @@
+[package]
+name = "sabacc-cli"
+version.workspace = true
+edition = "2021"
+description = "Terminal UI frontend for Kessel Sabacc"
+
+[dependencies]
+sabacc-core = { path = "../sabacc-core" }
+ratatui = { version = "0.29", features = ["crossterm"] }
+crossterm = "0.28"
+rand = { version = "0.8", features = ["small_rng"] }
+clap = { version = "4", features = ["derive"] }
