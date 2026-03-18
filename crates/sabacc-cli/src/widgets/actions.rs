@@ -34,6 +34,25 @@ pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
     };
 
     match &game.phase {
+        GamePhase::TurnAction if app.is_human_turn() && app.tui.source_picking => {
+            // Source picking mode: show navigation hints
+            let line = Line::from(vec![
+                Span::styled("←→", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(": Select source · ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(": Draw · ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
+            ]);
+            buf.set_line(inner.x, inner.y, &line, inner.width);
+            if inner.height > 1 {
+                let hint = Line::from(Span::styled(
+                    "1-4: direct pick",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                buf.set_line(inner.x, inner.y + 1, &hint, inner.width);
+            }
+        }
         GamePhase::TurnAction if app.is_human_turn() => {
             render_action_bar(inner, buf, app);
         }
@@ -178,47 +197,6 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 Span::styled("[n] No", Style::default().fg(Color::Green)),
             ]);
             buf.set_line(inner.x, inner.y + 1, &line, inner.width);
-        }
-        Overlay::SourcePicker => {
-            let popup = centered_popup(area, 36, 8);
-            Clear.render(popup, buf);
-            let block = Block::default()
-                .title(" Choose source ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow));
-            let inner = block.inner(popup);
-            block.render(popup, buf);
-
-            let sources = [
-                "1. Deck Sand",
-                "2. Deck Blood",
-                "3. Discard Sand",
-                "4. Discard Blood",
-            ];
-            let colors = [
-                super::card::SAND_COLOR,
-                super::card::BLOOD_COLOR,
-                super::card::SAND_COLOR,
-                super::card::BLOOD_COLOR,
-            ];
-
-            for (i, (source, color)) in sources.iter().zip(colors.iter()).enumerate() {
-                let selected = i == app.tui.selected_source;
-                let style = if selected {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(*color)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(*color)
-                };
-                if (i as u16) < inner.height {
-                    let prefix = if selected { "▶ " } else { "  " };
-                    buf.set_string(inner.x, inner.y + i as u16, prefix, style);
-                    buf.set_string(inner.x + 2, inner.y + i as u16, source, style);
-                }
-            }
         }
         Overlay::DiscardChoice { drawn, current } => {
             let popup = centered_popup(area, 46, 11);

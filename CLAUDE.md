@@ -898,6 +898,18 @@ Le pot (`credits_in_pot`) est affiché en ambre bold en haut du panneau PLAYERS,
 au-dessus de la liste des joueurs. La zone `inner` est réduite de 2 lignes pour
 compenser (pot + separator).
 
+### Sélection de source inline sur le tapis (v0.11.0)
+
+`Overlay::SourcePicker` a été supprimé. La sélection de source de pioche se fait
+désormais directement sur les cartes du tapis via `TuiState::source_picking: bool`.
+
+- Le mode est activé par `d`/Enter sur Draw, désactivé par Enter (confirme) ou Esc (annule)
+- `update_source_picking()` gère la navigation (←→/Tab/1-4) **avant** le dispatch overlay dans `update_playing()`
+- Le mapping source suit l'ordre visuel gauche→droite : 0=SandDiscard, 1=SandDeck, 2=BloodDeck, 3=BloodDiscard
+- `CardWidget.selected = true` rend la bordure blanche (existait déjà)
+- `render_empty_slot()` prend un paramètre `selected: bool` pour le même effet sur les slots vides
+- L'action bar affiche des hints contextuels (`←→: Select source · Enter: Draw · Esc: Cancel`)
+
 ---
 
 ## Flow de push (référence rapide)

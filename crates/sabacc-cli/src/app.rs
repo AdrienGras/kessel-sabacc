@@ -32,7 +32,6 @@ pub struct LogEntry {
 /// Which overlay is currently displayed on top of the main layout.
 #[derive(Debug, Clone)]
 pub enum Overlay {
-    SourcePicker,
     TokenPicker,
     TargetPicker {
         token: ShiftToken,
@@ -123,6 +122,8 @@ pub struct TuiState {
     pub selected_discard: usize,
     pub selected_die: usize,
     pub overlay: Option<Overlay>,
+    /// True when the player is selecting a draw source directly on the table.
+    pub source_picking: bool,
     #[allow(dead_code)]
     pub should_quit: bool,
     pub show_help: bool,
@@ -144,6 +145,7 @@ impl Default for TuiState {
             selected_discard: 0,
             selected_die: 0,
             overlay: None,
+            source_picking: false,
             should_quit: false,
             show_help: false,
             terminal_width: 80,
@@ -744,6 +746,11 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
         return (state, Command::None);
     }
 
+    // Handle source picking on the table (before overlays)
+    if state.tui.source_picking {
+        return update_source_picking(state, key);
+    }
+
     // Handle overlays first
     if state.tui.overlay.is_some() {
         return update_overlay(state, key);
@@ -833,6 +840,33 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
     }
 }
 
+fn update_source_picking(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    match key.code {
+        KeyCode::Left | KeyCode::BackTab | KeyCode::Up => {
+            state.tui.selected_source = (state.tui.selected_source + 3) % 4;
+        }
+        KeyCode::Right | KeyCode::Tab | KeyCode::Down => {
+            state.tui.selected_source = (state.tui.selected_source + 1) % 4;
+        }
+        KeyCode::Char('1') => state.tui.selected_source = 0,
+        KeyCode::Char('2') => state.tui.selected_source = 1,
+        KeyCode::Char('3') => state.tui.selected_source = 2,
+        KeyCode::Char('4') => state.tui.selected_source = 3,
+        KeyCode::Enter => {
+            state.tui.source_picking = false;
+            state = confirm_source_pick(state);
+            if !state.is_human_turn() {
+                return (state, Command::RunBots);
+            }
+        }
+        KeyCode::Esc => {
+            state.tui.source_picking = false;
+        }
+        _ => {}
+    }
+    (state, Command::None)
+}
+
 fn update_turn_action(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
     let has_tokens = state.game.as_ref().is_some_and(|g| {
         g.config.enable_shift_tokens
@@ -854,11 +888,16 @@ fn update_turn_action(mut state: AppState, key: KeyEvent) -> (AppState, Command)
             state.tui.overlay = Some(Overlay::TokenPicker);
             state.tui.selected_token = 0;
         }
+        KeyCode::Char('d') => {
+            // Draw → enter source picking mode on table
+            state.tui.source_picking = true;
+            state.tui.selected_source = 0;
+        }
         KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') => {
             // Direct source selection for draw
             let source_idx = (key.code.to_string().parse::<usize>().unwrap_or(1)) - 1;
             state.tui.selected_source = source_idx;
-            state.tui.overlay = Some(Overlay::SourcePicker);
+            state.tui.source_picking = false;
             state = confirm_source_pick(state);
             if !state.is_human_turn() {
                 return (state, Command::RunBots);
@@ -866,8 +905,8 @@ fn update_turn_action(mut state: AppState, key: KeyEvent) -> (AppState, Command)
         }
         KeyCode::Enter => match state.tui.selected_action {
             0 => {
-                // Draw → open SourcePicker
-                state.tui.overlay = Some(Overlay::SourcePicker);
+                // Draw → enter source picking mode on table
+                state.tui.source_picking = true;
                 state.tui.selected_source = 0;
             }
             1 => {
@@ -912,25 +951,6 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             _ => {
                 state.tui.overlay = None;
             }
-        },
-        Some(Overlay::SourcePicker) => match key.code {
-            KeyCode::Tab | KeyCode::Right | KeyCode::Down => {
-                state.tui.selected_source = (state.tui.selected_source + 1) % 4;
-            }
-            KeyCode::BackTab | KeyCode::Left | KeyCode::Up => {
-                state.tui.selected_source = (state.tui.selected_source + 3) % 4;
-            }
-            KeyCode::Char('1') => state.tui.selected_source = 0,
-            KeyCode::Char('2') => state.tui.selected_source = 1,
-            KeyCode::Char('3') => state.tui.selected_source = 2,
-            KeyCode::Char('4') => state.tui.selected_source = 3,
-            KeyCode::Enter => {
-                state = confirm_source_pick(state);
-                if !state.is_human_turn() {
-                    return (state, Command::RunBots);
-                }
-            }
-            _ => {}
         },
         Some(Overlay::DiscardChoice { .. }) => match key.code {
             KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
@@ -1237,10 +1257,11 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn confirm_source_pick(mut state: AppState) -> AppState {
+    // Visual order (left→right): Discard Sand, Deck Sand, Deck Blood, Discard Blood
     let sources = [
+        DrawSource::SandDiscard,
         DrawSource::SandDeck,
         DrawSource::BloodDeck,
-        DrawSource::SandDiscard,
         DrawSource::BloodDiscard,
     ];
     let source = sources[state.tui.selected_source];

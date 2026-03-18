@@ -54,65 +54,97 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         ])
         .split(cards_area);
 
-    // Discard Sand
+    let picking = app.tui.source_picking;
+    let sel = app.tui.selected_source;
+
+    // Discard Sand (source index 0)
     if let Some(top) = game.sand_deck.peek_discard() {
-        CardWidget::from_card(top, false).render(card_cols[0], buf);
+        let mut cw = CardWidget::from_card(top, false);
+        cw.selected = picking && sel == 0;
+        cw.render(card_cols[0], buf);
     } else {
-        render_empty_slot(card_cols[0], buf, SAND_COLOR);
+        render_empty_slot(card_cols[0], buf, SAND_COLOR, picking && sel == 0);
     }
 
-    // Deck Sand
-    CardWidget::face_down().render(card_cols[2], buf);
+    // Deck Sand (source index 1)
+    let mut deck_sand = CardWidget::face_down();
+    deck_sand.selected = picking && sel == 1;
+    deck_sand.render(card_cols[2], buf);
 
-    // Deck Blood
-    CardWidget::face_down().render(card_cols[4], buf);
+    // Deck Blood (source index 2)
+    let mut deck_blood = CardWidget::face_down();
+    deck_blood.selected = picking && sel == 2;
+    deck_blood.render(card_cols[4], buf);
 
-    // Discard Blood
+    // Discard Blood (source index 3)
     if let Some(top) = game.blood_deck.peek_discard() {
-        CardWidget::from_card(top, false).render(card_cols[6], buf);
+        let mut cw = CardWidget::from_card(top, false);
+        cw.selected = picking && sel == 3;
+        cw.render(card_cols[6], buf);
     } else {
-        render_empty_slot(card_cols[6], buf, BLOOD_COLOR);
+        render_empty_slot(card_cols[6], buf, BLOOD_COLOR, picking && sel == 3);
     }
 
     // Labels under cards
     let label_y = inner.y + v_offset + 5;
     if label_y < inner.bottom() {
-        buf.set_string(
-            card_cols[0].x,
-            label_y,
-            "Dis Sand",
-            Style::default().fg(SAND_COLOR),
-        );
+        let highlight_style = Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD);
+
+        let dis_sand_style = if picking && sel == 0 {
+            highlight_style
+        } else {
+            Style::default().fg(SAND_COLOR)
+        };
+        buf.set_string(card_cols[0].x, label_y, "Dis Sand", dis_sand_style);
+
+        let deck_sand_style = if picking && sel == 1 {
+            highlight_style
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
         buf.set_string(
             card_cols[2].x,
             label_y,
             format!("Deck({})", game.sand_deck.draw_pile.len()),
-            Style::default().fg(Color::DarkGray),
+            deck_sand_style,
         );
+
+        let deck_blood_style = if picking && sel == 2 {
+            highlight_style
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
         buf.set_string(
             card_cols[4].x,
             label_y,
             format!("Deck({})", game.blood_deck.draw_pile.len()),
-            Style::default().fg(Color::DarkGray),
+            deck_blood_style,
         );
-        buf.set_string(
-            card_cols[6].x,
-            label_y,
-            "Dis Blood",
-            Style::default().fg(BLOOD_COLOR),
-        );
+
+        let dis_blood_style = if picking && sel == 3 {
+            highlight_style
+        } else {
+            Style::default().fg(BLOOD_COLOR)
+        };
+        buf.set_string(card_cols[6].x, label_y, "Dis Blood", dis_blood_style);
     }
 }
 
-fn render_empty_slot(area: Rect, buf: &mut Buffer, color: Color) {
+fn render_empty_slot(area: Rect, buf: &mut Buffer, color: Color, selected: bool) {
     if area.height < 5 || area.width < 8 {
         return;
     }
+    let border_style = if selected {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
     let style = Style::default().fg(color);
-    let dim = Style::default().fg(Color::DarkGray);
-    buf.set_string(area.x, area.y, "┌──────┐", dim);
-    buf.set_string(area.x, area.y + 1, "│      │", dim);
+    buf.set_string(area.x, area.y, "┌──────┐", border_style);
+    buf.set_string(area.x, area.y + 1, "│      │", border_style);
     buf.set_string(area.x, area.y + 2, "│ empty│", style);
-    buf.set_string(area.x, area.y + 3, "│      │", dim);
-    buf.set_string(area.x, area.y + 4, "└──────┘", dim);
+    buf.set_string(area.x, area.y + 3, "│      │", border_style);
+    buf.set_string(area.x, area.y + 4, "└──────┘", border_style);
 }
