@@ -55,6 +55,12 @@ pub enum Overlay {
         revealed_count: usize,
         total_players: usize,
     },
+    RoundAnnouncement {
+        round: u8,
+        players_remaining: usize,
+        chip_leader: String,
+        ticks_remaining: u16,
+    },
     GameOverScreen {
         standings: Vec<StandingEntry>,
         stats: GameOverStats,
@@ -249,6 +255,10 @@ impl AppState {
                 return true;
             }
         }
+        // RoundAnnouncement auto-dismiss timer
+        if matches!(&self.tui.overlay, Some(Overlay::RoundAnnouncement { .. })) {
+            return true;
+        }
         false
     }
 
@@ -334,6 +344,18 @@ pub fn update(mut state: AppState, event: AppEvent) -> (AppState, Command) {
                         state.tui.reveal_tick_counter = 0;
                         *revealed_count += 1;
                     }
+                }
+            }
+
+            // RoundAnnouncement auto-dismiss countdown
+            if let Some(Overlay::RoundAnnouncement { ticks_remaining, .. }) =
+                &mut state.tui.overlay
+            {
+                if *ticks_remaining > 0 {
+                    *ticks_remaining -= 1;
+                } else {
+                    state.tui.overlay = None;
+                    return dismiss_round_announcement(state);
                 }
             }
 
@@ -960,9 +982,20 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     // Close overlay and advance round
                     state.tui.overlay = None;
                     state = apply_game_action(state, Action::AdvanceRound);
-                    if !state.is_human_turn() {
-                        return (state, Command::RunBots);
+
+                    // If GameOver → the overlay was already set by check_phase_transitions
+                    if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
+                        return (state, Command::None);
                     }
+
+                    // Otherwise → show RoundAnnouncement overlay
+                    let (round, remaining, leader) = build_round_summary(&state);
+                    state.tui.overlay = Some(Overlay::RoundAnnouncement {
+                        round,
+                        players_remaining: remaining,
+                        chip_leader: leader,
+                        ticks_remaining: 60, // ~2s at 33ms/tick
+                    });
                 }
                 KeyCode::Up | KeyCode::PageUp => {
                     if let Some(Overlay::RoundResults {
@@ -983,6 +1016,13 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                 _ => {}
             }
         }
+        Some(Overlay::RoundAnnouncement { .. }) => match key.code {
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                state.tui.overlay = None;
+                return dismiss_round_announcement(state);
+            }
+            _ => {}
+        },
         Some(Overlay::GameOverScreen { .. }) => match key.code {
             KeyCode::Enter => {
                 let mut new_state = AppState::new();
@@ -1074,6 +1114,43 @@ fn apply_game_action(mut state: AppState, action: Action) -> AppState {
         }
     }
     state
+}
+
+/// Handles dismissal of the RoundAnnouncement overlay.
+/// Applies AdvanceRound to transition from RoundEnd → TurnAction,
+/// then triggers RunBots if needed.
+fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
+    // The game is still in RoundEnd — apply AdvanceRound to start the next round
+    if state
+        .game
+        .as_ref()
+        .is_some_and(|g| matches!(g.phase, GamePhase::RoundEnd))
+    {
+        state = apply_game_action(state, Action::AdvanceRound);
+    }
+    // If AdvanceRound led to GameOver, the overlay was set by check_phase_transitions
+    if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
+        return (state, Command::None);
+    }
+    if !state.is_human_turn() {
+        return (state, Command::RunBots);
+    }
+    (state, Command::None)
+}
+
+/// Builds a summary for the RoundAnnouncement overlay.
+fn build_round_summary(state: &AppState) -> (u8, usize, String) {
+    let game = state.game.as_ref().expect("game must exist");
+    let round = game.round;
+    let remaining = game.players.iter().filter(|p| !p.is_eliminated).count();
+    let leader = game
+        .players
+        .iter()
+        .filter(|p| !p.is_eliminated)
+        .max_by_key(|p| p.chips)
+        .map(|p| p.name.clone())
+        .unwrap_or_default();
+    (round, remaining, leader)
 }
 
 fn check_phase_transitions(state: &mut AppState, game: &GameState) {

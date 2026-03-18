@@ -782,8 +782,8 @@ en anglais. Maintenir cette cohérence pour tout nouveau texte ajouté.
 `AppState::is_animating()` contrôle si le main loop génère des ticks (33ms) ou
 bloque en attente d'input. Si une animation visuelle (overlay reveal, etc.) n'est
 pas couverte par `is_animating()`, les ticks cessent et l'animation gèle.
-Actuellement couvre : `AnimationQueue` + `RoundResults` reveal. Tout nouvel effet
-animé doit être ajouté à cette vérification.
+Actuellement couvre : `AnimationQueue` + `RoundResults` reveal + `RoundAnnouncement`
+countdown. Tout nouvel effet animé doit être ajouté à cette vérification.
 
 ### Double impostor : overlay en deux étapes
 
@@ -798,6 +798,24 @@ deux choix de dés consécutifs (Sand puis Blood) avant de soumettre un seul
 `p.chips + p.pot`. Le pot est "investi et à risque". `chips_after` = réserve + pot
 retourné (winner) ou réserve - pénalité (loser). Cela montre la transition visible
 du pot qui revient dans la réserve du gagnant.
+
+### AdvanceRound est un double-step : Reveal → RoundEnd → TurnAction
+
+`Action::AdvanceRound` depuis `Reveal` ne va pas directement à `TurnAction` —
+il passe par `RoundEnd` d'abord. Il faut un **2ème `AdvanceRound`** pour aller
+de `RoundEnd` → `TurnAction` du round suivant. Tout overlay intermédiaire
+(comme `RoundAnnouncement`) doit appliquer ce 2ème AdvanceRound à son dismiss,
+sinon le joueur reste bloqué en `RoundEnd` avec "[Enter] Next round".
+
+### Overlays auto-dismiss : timer + skip + action post-dismiss
+
+Pour un overlay qui se ferme automatiquement après N ticks :
+1. Ajouter le variant avec `ticks_remaining: u16` (~60 ticks = ~2s à 33ms)
+2. `is_animating()` doit retourner `true` (sinon pas de ticks)
+3. Tick handler : décrémenter, puis appeler une fonction de dismiss partagée
+4. Input handler (Enter/Space) : même fonction de dismiss
+5. La fonction de dismiss doit gérer les transitions de phase post-fermeture
+   (AdvanceRound, RunBots, GameOver check, etc.)
 
 ### Log : word-wrap + préfixe `›` pour distinguer les messages
 

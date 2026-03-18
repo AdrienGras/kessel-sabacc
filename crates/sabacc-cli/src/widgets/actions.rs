@@ -414,6 +414,46 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 }
             }
         }
+        Overlay::RoundAnnouncement {
+            round,
+            players_remaining,
+            chip_leader,
+            ..
+        } => {
+            let popup = centered_popup(area, 27, 7);
+            Clear.render(popup, buf);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow));
+            let inner = block.inner(popup);
+            block.render(popup, buf);
+
+            // Title: ⚔ Round N
+            let title_line = Line::from(vec![Span::styled(
+                format!("⚔ Round {round}"),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]);
+            let title_x = inner.x + inner.width.saturating_sub(title_line.width() as u16) / 2;
+            buf.set_line(title_x, inner.y + 1, &title_line, inner.width);
+
+            // Players remaining
+            let players_line = Line::from(vec![Span::styled(
+                format!("{players_remaining} players remaining"),
+                Style::default().fg(Color::DarkGray),
+            )]);
+            let px = inner.x + inner.width.saturating_sub(players_line.width() as u16) / 2;
+            buf.set_line(px, inner.y + 2, &players_line, inner.width);
+
+            // Chip leader
+            let leader_line = Line::from(vec![Span::styled(
+                format!("Leader: {chip_leader}"),
+                Style::default().fg(Color::DarkGray),
+            )]);
+            let lx = inner.x + inner.width.saturating_sub(leader_line.width() as u16) / 2;
+            buf.set_line(lx, inner.y + 3, &leader_line, inner.width);
+        }
         Overlay::RoundResults { .. } => {
             super::results::render_round_results(area, buf, overlay);
         }
