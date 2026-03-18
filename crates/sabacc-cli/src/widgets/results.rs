@@ -36,7 +36,7 @@ pub fn render_round_results(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(WINNER_COLOR));
     let inner = block.inner(popup);
     block.render(popup, buf);
@@ -252,7 +252,7 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(WINNER_COLOR));
     let inner = block.inner(popup);
     block.render(popup, buf);

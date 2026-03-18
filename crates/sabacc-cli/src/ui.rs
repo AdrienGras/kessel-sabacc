@@ -503,6 +503,7 @@ fn render_setup(frame: &mut Frame, app: &AppState) {
 fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -602,14 +603,72 @@ fn render_playing(frame: &mut Frame, app: &AppState) {
         return;
     }
 
-    // Vertical: header + main
-    let main_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(20)])
-        .split(area);
+    // Build dynamic border title: "Round N · Turn N · Phase"
+    let is_human = app.is_human_turn();
+    let title_line = match &app.game {
+        Some(g) => {
+            let (phase_text, phase_color) =
+                widgets::header::phase_label_styled(&g.phase, is_human);
+            let dot_style = Style::default().fg(Color::DarkGray);
+            let phase_style = if matches!(g.phase, sabacc_core::game::GamePhase::GameOver { .. }) {
+                Style::default()
+                    .fg(phase_color)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(phase_color)
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!(" Round {} ", g.round),
+                    Style::default().fg(AMBER).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("· ", dot_style),
+                Span::styled(format!("Turn {}/3 ", g.turn), Style::default().fg(Color::White)),
+                Span::styled("· ", dot_style),
+                Span::styled(format!("{} ", phase_text), phase_style),
+            ])
+        }
+        None => Line::from(Span::styled(
+            " Kessel Sabacc ",
+            Style::default().fg(AMBER).add_modifier(Modifier::BOLD),
+        )),
+    };
 
-    // Header
-    widgets::header::render(main_layout[0], frame.buffer_mut(), app);
+    // Build dynamic footer hints
+    let footer_text = match &app.game {
+        Some(g) => match &g.phase {
+            sabacc_core::game::GamePhase::TurnAction if is_human => {
+                "↑↓ Navigate · Enter Select · s Token · ? Help"
+            }
+            sabacc_core::game::GamePhase::TurnAction => "? Help · q Quit",
+            sabacc_core::game::GamePhase::ChoosingDiscard { .. } => {
+                "1/2 Choose · Enter Confirm"
+            }
+            sabacc_core::game::GamePhase::Reveal { .. }
+            | sabacc_core::game::GamePhase::RoundEnd => "Enter Continue · ↑↓ Scroll",
+            sabacc_core::game::GamePhase::GameOver { .. } => "Enter New game · q Quit",
+            sabacc_core::game::GamePhase::ImpostorReveal { .. }
+            | sabacc_core::game::GamePhase::PrimeSabaccChoice { .. } => {
+                "↑↓ Navigate · Enter Confirm"
+            }
+            _ => "? Help · q Quit",
+        },
+        None => "? Help · q Quit",
+    };
+    let footer_line = Line::from(Span::styled(
+        format!(" {} ", footer_text),
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    // Amber rounded border
+    let border = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(AMBER))
+        .title(title_line)
+        .title_bottom(footer_line);
+    let inner = border.inner(area);
+    frame.render_widget(border, area);
 
     // Horizontal: 3 columns
     let cols = Layout::default()
@@ -619,7 +678,7 @@ fn render_playing(frame: &mut Frame, app: &AppState) {
             Constraint::Min(60),    // center (game)
             Constraint::Length(27), // log
         ])
-        .split(main_layout[1]);
+        .split(inner);
 
     // Center vertical: tapis (expands) + actions + hand (fixed bottom)
     // Heights include 2 for borders (top+bottom)
@@ -660,6 +719,7 @@ fn render_help(frame: &mut Frame) {
     let block = Block::default()
         .title(" Help — Kessel Sabacc ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Cyan));
 
     let help_text = vec![

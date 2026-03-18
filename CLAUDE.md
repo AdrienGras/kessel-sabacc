@@ -873,6 +873,31 @@ Les descriptions de menu supportent `{text}` pour le barré via `parse_desc_line
 dans ui.rs. Le parser est générique — tout texte entre accolades est rendu avec
 `Modifier::CROSSED_OUT`.
 
+### BorderType::Rounded partout (v0.10.0)
+
+Depuis v0.10.0, **tous** les `Block` de l'application utilisent `BorderType::Rounded`
+(coins `╭╮╰╯`). Cela inclut :
+- La bordure extérieure de l'écran de jeu (ambre, avec titre dynamique Round/Turn/Phase)
+- Les 5 panels intégrés (PLAYERS, GAME TABLE, ACTIONS, YOUR HAND, LOG)
+- Tous les overlays (source picker, discard, tokens, target, impostor, quit, help,
+  round announce, round results, game over)
+- Le chrome des écrans menu (MainMenu, Setup, HowToPlay)
+
+Lors de l'ajout d'un nouveau `Block::default()`, toujours ajouter `.border_type(BorderType::Rounded)`.
+
+### Header intégré dans la bordure de jeu (v0.10.0)
+
+Le header standalone (2 lignes, `header.rs::render()`) a été remplacé par un titre
+dynamique dans la bordure arrondie de l'écran de jeu. `header.rs` ne contient plus
+que `phase_label_styled(phase, is_human) -> (String, Color)` utilisée par `ui.rs`.
+Le footer de la bordure affiche des hints clavier contextuels selon la `GamePhase`.
+
+### Pot affiché dans le panneau PLAYERS (v0.10.0)
+
+Le pot (`credits_in_pot`) est affiché en ambre bold en haut du panneau PLAYERS,
+au-dessus de la liste des joueurs. La zone `inner` est réduite de 2 lignes pour
+compenser (pot + separator).
+
 ---
 
 ## Flow de push (référence rapide)

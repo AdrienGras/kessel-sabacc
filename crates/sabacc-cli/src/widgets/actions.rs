@@ -3,7 +3,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Widget};
 
 use sabacc_core::game::GamePhase;
 use sabacc_core::shift_token::ShiftToken;
@@ -18,6 +18,7 @@ pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
     let block = Block::default()
         .title(" ACTIONS ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray))
         .title_style(
             Style::default()
@@ -168,6 +169,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let block = Block::default()
                 .title(" Quit? ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Red));
             let inner = block.inner(popup);
             block.render(popup, buf);
@@ -183,6 +185,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let block = Block::default()
                 .title(" Choose source ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Yellow));
             let inner = block.inner(popup);
             block.render(popup, buf);
@@ -223,6 +226,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let block = Block::default()
                 .title(" Keep or Discard? ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Cyan));
             let inner = block.inner(popup);
             block.render(popup, buf);
@@ -301,6 +305,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let block = Block::default()
                 .title(" ShiftTokens ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Magenta));
             let inner = block.inner(popup);
             block.render(popup, buf);
@@ -351,6 +356,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let block = Block::default()
                 .title(format!(" Target — {:?} ", token))
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Red));
             let inner = block.inner(popup);
             block.render(popup, buf);
@@ -393,6 +399,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let block = Block::default()
                 .title(title)
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Magenta));
             let inner = block.inner(popup);
             block.render(popup, buf);
@@ -427,6 +434,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             Clear.render(popup, buf);
             let block = Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Yellow));
             let inner = block.inner(popup);
             block.render(popup, buf);

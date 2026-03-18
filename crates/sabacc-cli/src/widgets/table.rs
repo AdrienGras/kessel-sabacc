@@ -2,7 +2,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 use super::card::{CardWidget, BLOOD_COLOR, SAND_COLOR};
 use crate::app::AppState;
@@ -17,6 +17,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     let block = Block::default()
         .title(" GAME TABLE ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray))
         .title_style(Style::default().fg(SAND_COLOR).add_modifier(Modifier::BOLD));
     let inner = block.inner(area);

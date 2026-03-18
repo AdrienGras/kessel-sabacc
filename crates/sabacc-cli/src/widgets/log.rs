@@ -2,7 +2,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 use crate::app::AppState;
 
@@ -11,6 +11,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     let block = Block::default()
         .title(" LOG ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray));
 
     let inner = block.inner(area);

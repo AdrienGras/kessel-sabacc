@@ -3,7 +3,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 use crate::animation::Animation;
 use crate::app::AppState;
@@ -13,6 +13,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     let block = Block::default()
         .title(" PLAYERS ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray));
 
     let inner = block.inner(area);
@@ -22,6 +23,20 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         Some(g) => g,
         None => return,
     };
+
+    // Pot line at the top of the players panel
+    let pot_text = format!("Pot: {}cr", game.credits_in_pot);
+    buf.set_string(
+        inner.x + 1,
+        inner.y,
+        &pot_text,
+        Style::default()
+            .fg(Color::Rgb(232, 192, 80))
+            .add_modifier(Modifier::BOLD),
+    );
+
+    // Adjust inner area: skip the pot line + 1 separator
+    let inner = Rect::new(inner.x, inner.y + 2, inner.width, inner.height.saturating_sub(2));
 
     let available_height = inner.height as usize;
     let player_count = game.players.len();
