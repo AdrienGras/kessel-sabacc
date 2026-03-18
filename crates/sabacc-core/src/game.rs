@@ -139,6 +139,8 @@ pub struct GameState {
     pub free_draw_active: bool,
     /// Pending audit effects.
     pub pending_audit: PendingAudit,
+    /// Order in which players were eliminated: (player_id, round_number).
+    pub elimination_order: Vec<(PlayerId, u8)>,
 }
 
 /// An action that can be applied to the game state.
@@ -208,6 +210,7 @@ pub fn new_game(config: GameConfig, rng: &mut impl Rng) -> Result<GameState, Gam
         token_played_this_turn: false,
         free_draw_active: false,
         pending_audit: PendingAudit::default(),
+        elimination_order: Vec::new(),
     })
 }
 
@@ -658,6 +661,18 @@ fn apply_advance_round(
                 &mut state.sand_deck,
                 &mut state.blood_deck,
             );
+            // Track newly eliminated players
+            let current_round = state.round;
+            for player in &state.players {
+                if player.is_eliminated
+                    && !state
+                        .elimination_order
+                        .iter()
+                        .any(|(pid, _)| *pid == player.id)
+                {
+                    state.elimination_order.push((player.id, current_round));
+                }
+            }
             state.phase = GamePhase::RoundEnd;
             Ok(state)
         }

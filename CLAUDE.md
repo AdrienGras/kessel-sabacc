@@ -777,6 +777,28 @@ Depuis v0.5.0, toute l'interface du jeu est en anglais. Les messages de log, les
 overlays, les labels, les descriptions de tokens, l'écran de setup et l'aide sont
 en anglais. Maintenir cette cohérence pour tout nouveau texte ajouté.
 
+### is_animating() doit couvrir TOUTES les animations visuelles
+
+`AppState::is_animating()` contrôle si le main loop génère des ticks (33ms) ou
+bloque en attente d'input. Si une animation visuelle (overlay reveal, etc.) n'est
+pas couverte par `is_animating()`, les ticks cessent et l'animation gèle.
+Actuellement couvre : `AnimationQueue` + `RoundResults` reveal. Tout nouvel effet
+animé doit être ajouté à cette vérification.
+
+### Double impostor : overlay en deux étapes
+
+Quand un joueur a Sand+Blood impostors, l'overlay `ImpostorChoice` doit proposer
+deux choix de dés consécutifs (Sand puis Blood) avant de soumettre un seul
+`ImpostorChoice` au core avec `sand_choice` ET `blood_choice` remplis. Le champ
+`has_blood_impostor` sur l'overlay contrôle ce flow en deux étapes.
+
+### RoundResults chips_before : réserve seule, pas réserve+pot
+
+`chips_before` dans `RoundResultDisplay` doit être `p.chips` (réserve seule), pas
+`p.chips + p.pot`. Le pot est "investi et à risque". `chips_after` = réserve + pot
+retourné (winner) ou réserve - pénalité (loser). Cela montre la transition visible
+du pot qui revient dans la réserve du gagnant.
+
 ### Log : word-wrap + préfixe `›` pour distinguer les messages
 
 Pour un log dans une colonne étroite, ne pas tronquer — wrapper intelligemment.

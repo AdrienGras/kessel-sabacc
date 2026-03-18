@@ -42,16 +42,57 @@ pub enum Overlay {
         die2: u8,
         for_sand: bool,
         sand_choice: Option<u8>,
+        has_blood_impostor: bool,
     },
     PrimeSabaccChoice {
         die1: u8,
         die2: u8,
     },
     QuitConfirm,
-    GameOver {
-        winner_name: String,
-        is_human: bool,
+    RoundResults {
+        results: Vec<RoundResultDisplay>,
+        scroll_offset: usize,
+        revealed_count: usize,
+        total_players: usize,
     },
+    GameOverScreen {
+        standings: Vec<StandingEntry>,
+        stats: GameOverStats,
+    },
+}
+
+/// Pre-formatted display data for a single player's round result.
+#[derive(Debug, Clone)]
+pub struct RoundResultDisplay {
+    pub player_name: String,
+    pub rank_str: String,
+    pub hand: (Card, Card),
+    pub is_winner: bool,
+    pub is_eliminated: bool,
+    pub chips_before: u8,
+    pub invested: u8,
+    pub chips_after: u8,
+    pub penalty: u8,
+    pub penalty_reason: String,
+}
+
+/// A single entry in the final standings.
+#[derive(Debug, Clone)]
+pub struct StandingEntry {
+    pub rank: u8,
+    pub player_name: String,
+    pub is_human: bool,
+    pub status: String,
+    #[allow(dead_code)]
+    pub rounds_survived: u8,
+}
+
+/// Aggregate stats for the game over screen.
+#[derive(Debug, Clone)]
+pub struct GameOverStats {
+    pub rounds_played: u8,
+    pub credits_in_pot: u32,
+    pub winner_name: String,
 }
 
 /// Focus state for keyboard navigation.
@@ -79,6 +120,7 @@ pub struct TuiState {
     pub terminal_height: u16,
     pub log_scroll_offset: usize,
     pub log_auto_scroll: bool,
+    pub reveal_tick_counter: u8,
 }
 
 impl Default for TuiState {
@@ -98,6 +140,7 @@ impl Default for TuiState {
             terminal_height: 24,
             log_scroll_offset: 0,
             log_auto_scroll: true,
+            reveal_tick_counter: 0,
         }
     }
 }
@@ -192,7 +235,21 @@ impl AppState {
     }
 
     pub fn is_animating(&self) -> bool {
-        self.animations.is_animating()
+        if self.animations.is_animating() {
+            return true;
+        }
+        // RoundResults reveal animation also counts as animating (keeps ticks firing)
+        if let Some(Overlay::RoundResults {
+            revealed_count,
+            total_players,
+            ..
+        }) = &self.tui.overlay
+        {
+            if *revealed_count < *total_players {
+                return true;
+            }
+        }
+        false
     }
 
     /// Returns the human player (always id 0).
@@ -264,6 +321,22 @@ pub fn update(mut state: AppState, event: AppEvent) -> (AppState, Command) {
                 state.push_log(msg);
             }
 
+            // Animate RoundResults reveal (~500ms per player = ~8 ticks at 60ms)
+            if let Some(Overlay::RoundResults {
+                revealed_count,
+                total_players,
+                ..
+            }) = &mut state.tui.overlay
+            {
+                if *revealed_count < *total_players {
+                    state.tui.reveal_tick_counter += 1;
+                    if state.tui.reveal_tick_counter >= 8 {
+                        state.tui.reveal_tick_counter = 0;
+                        *revealed_count += 1;
+                    }
+                }
+            }
+
             // When animations finish, check if bots need to act
             if !state.is_animating() {
                 if let Some(ref g) = state.game {
@@ -298,6 +371,15 @@ fn update_key(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
         let messages = state.animations.skip_all();
         for msg in messages {
             state.push_log(msg);
+        }
+        // Also skip RoundResults reveal animation
+        if let Some(Overlay::RoundResults {
+            revealed_count,
+            total_players,
+            ..
+        }) = &mut state.tui.overlay
+        {
+            *revealed_count = *total_players;
         }
         // After skip, check if bots need to run
         if let Some(ref g) = state.game {
@@ -474,9 +556,9 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
     match &game.phase {
         GamePhase::TurnAction if state.is_human_turn() => update_turn_action(state, key),
         GamePhase::Reveal { .. } | GamePhase::RoundEnd => {
-            if key.code == KeyCode::Enter {
+            // RoundResults overlay handles input; if no overlay, allow Enter
+            if state.tui.overlay.is_none() && key.code == KeyCode::Enter {
                 state = apply_game_action(state, Action::AdvanceRound);
-                // After advancing, check if bots should play
                 if !state.is_human_turn() {
                     return (state, Command::RunBots);
                 }
@@ -507,6 +589,8 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                 {
                     let has_sand_impostor =
                         matches!(hand.sand.value, sabacc_core::card::CardValue::Impostor);
+                    let has_blood_impostor =
+                        matches!(hand.blood.value, sabacc_core::card::CardValue::Impostor);
                     let die1 = (state.rng.next_u64() % 6 + 1) as u8;
                     let die2 = (state.rng.next_u64() % 6 + 1) as u8;
                     state.tui.overlay = Some(Overlay::ImpostorChoice {
@@ -514,6 +598,7 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                         die2,
                         for_sand: has_sand_impostor,
                         sand_choice: None,
+                        has_blood_impostor,
                     });
                 }
                 (state, Command::None)
@@ -775,6 +860,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             die2,
             for_sand,
             sand_choice,
+            has_blood_impostor,
         }) => match key.code {
             KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
                 state.tui.selected_die = 1 - state.tui.selected_die;
@@ -786,20 +872,41 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     die2
                 };
 
-                let choice = sabacc_core::scoring::ImpostorChoice {
-                    player_id: 0,
-                    die1,
-                    die2,
-                    sand_choice: if for_sand { Some(chosen) } else { sand_choice },
-                    blood_choice: if for_sand { None } else { Some(chosen) },
-                };
+                if for_sand && has_blood_impostor {
+                    // Double impostor: Sand chosen, now need Blood choice
+                    state.tui.selected_die = 0;
+                    let new_die1 = (state.rng.next_u64() % 6 + 1) as u8;
+                    let new_die2 = (state.rng.next_u64() % 6 + 1) as u8;
+                    state.push_log(format!("Sand Imp→{chosen}"));
+                    state.tui.overlay = Some(Overlay::ImpostorChoice {
+                        die1: new_die1,
+                        die2: new_die2,
+                        for_sand: false,
+                        sand_choice: Some(chosen),
+                        has_blood_impostor: true,
+                    });
+                } else {
+                    // Single impostor or Blood step of double impostor
+                    let final_sand = if for_sand { Some(chosen) } else { sand_choice };
+                    let final_blood = if for_sand { None } else { Some(chosen) };
 
-                state.tui.overlay = None;
-                state.tui.selected_die = 0;
-                state.push_log(format!("Impostor→{chosen}"));
-                state = apply_game_action(state, Action::SubmitImpostorChoice(choice));
-                if !state.is_human_turn() {
-                    return (state, Command::RunBots);
+                    let choice = sabacc_core::scoring::ImpostorChoice {
+                        player_id: 0,
+                        die1,
+                        die2,
+                        sand_choice: final_sand,
+                        blood_choice: final_blood,
+                    };
+
+                    state.tui.overlay = None;
+                    state.tui.selected_die = 0;
+                    let label = if has_blood_impostor { "Blood Imp" } else { "Impostor" };
+                    state.push_log(format!("{label}→{chosen}"));
+                    state =
+                        apply_game_action(state, Action::SubmitImpostorChoice(choice));
+                    if !state.is_human_turn() {
+                        return (state, Command::RunBots);
+                    }
                 }
             }
             _ => {}
@@ -830,7 +937,53 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             }
             _ => {}
         },
-        Some(Overlay::GameOver { .. }) => match key.code {
+        Some(Overlay::RoundResults {
+            revealed_count,
+            total_players,
+            scroll_offset,
+            ..
+        }) => {
+            let revealed = revealed_count;
+            let total = total_players;
+            let scroll = scroll_offset;
+            match key.code {
+                KeyCode::Char(' ') => {
+                    // Skip animation — reveal all
+                    if let Some(Overlay::RoundResults {
+                        revealed_count, ..
+                    }) = &mut state.tui.overlay
+                    {
+                        *revealed_count = total;
+                    }
+                }
+                KeyCode::Enter if revealed >= total => {
+                    // Close overlay and advance round
+                    state.tui.overlay = None;
+                    state = apply_game_action(state, Action::AdvanceRound);
+                    if !state.is_human_turn() {
+                        return (state, Command::RunBots);
+                    }
+                }
+                KeyCode::Up | KeyCode::PageUp => {
+                    if let Some(Overlay::RoundResults {
+                        scroll_offset, ..
+                    }) = &mut state.tui.overlay
+                    {
+                        *scroll_offset = scroll.saturating_sub(2);
+                    }
+                }
+                KeyCode::Down | KeyCode::PageDown => {
+                    if let Some(Overlay::RoundResults {
+                        scroll_offset, ..
+                    }) = &mut state.tui.overlay
+                    {
+                        *scroll_offset = scroll + 2;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Some(Overlay::GameOverScreen { .. }) => match key.code {
             KeyCode::Enter => {
                 let mut new_state = AppState::new();
                 new_state.setup = state.setup.clone();
@@ -926,57 +1079,112 @@ fn apply_game_action(mut state: AppState, action: Action) -> AppState {
 fn check_phase_transitions(state: &mut AppState, game: &GameState) {
     match &game.phase {
         GamePhase::Reveal { results } => {
-            // Queue reveal animations
+            // Build RoundResultDisplay for each player
+            let mut display_results = Vec::new();
             for result in results {
                 let player = game.players.iter().find(|p| p.id == result.player_id);
                 let name = player.map_or("?".into(), |p| p.name.clone());
                 let rank_str = short_rank(&result.rank);
-                let is_winner = result.is_winner;
 
-                state.animations.push(Animation::PlayerHighlight {
-                    player_id: result.player_id,
-                    color: ratatui::style::Color::Yellow,
-                    duration_ms: 300,
-                });
-                state.animations.push(Animation::CardReveal {
-                    player_id: result.player_id,
-                    delay_ms: 500,
-                });
-
-                let status = if is_winner {
-                    "WIN".to_string()
-                } else if result.penalty > 0 {
-                    format!("-{}", result.penalty)
+                // chips_before = reserve chips only (what the player sees in their stack)
+                let chips_before = player.map_or(0, |p| p.chips);
+                // chips_after: winner gets pot back to reserve, loser loses penalty from reserve
+                let chips_after = if result.is_winner {
+                    player.map_or(0, |p| p.chips + p.pot) // pot returns to reserve
                 } else {
-                    "OK".to_string()
+                    player.map_or(0, |p| p.chips.saturating_sub(result.penalty))
                 };
-                state.animations.push(Animation::LogMessage {
-                    text: format!("{name}: {rank_str} — {status}"),
+                let is_eliminated = chips_after == 0;
+
+                let penalty_reason = if result.is_winner {
+                    "Winner!".into()
+                } else {
+                    match &result.rank {
+                        sabacc_core::hand::HandRank::PureSabacc
+                        | sabacc_core::hand::HandRank::PrimeSabacc { .. }
+                        | sabacc_core::hand::HandRank::SylopSabacc { .. }
+                        | sabacc_core::hand::HandRank::Sabacc { .. } => {
+                            format!("Sabacc penalty: -{}", result.penalty)
+                        }
+                        sabacc_core::hand::HandRank::NonSabacc { difference } => {
+                            format!("diff={difference}: -{}", result.penalty)
+                        }
+                    }
+                };
+
+                let hand = player
+                    .and_then(|p| p.hand.as_ref())
+                    .map(|h| (h.sand.clone(), h.blood.clone()))
+                    .unwrap_or_else(|| {
+                        (
+                            sabacc_core::card::Card::number(sabacc_core::card::Family::Sand, 1),
+                            sabacc_core::card::Card::number(sabacc_core::card::Family::Blood, 1),
+                        )
+                    });
+
+                display_results.push(RoundResultDisplay {
+                    player_name: name,
+                    rank_str,
+                    hand,
+                    is_winner: result.is_winner,
+                    is_eliminated,
+                    chips_before,
+                    invested: result.invested,
+                    chips_after,
+                    penalty: result.penalty,
+                    penalty_reason,
                 });
-                state.animations.push(Animation::Pause { duration_ms: 300 });
             }
 
-            // Find winner
-            if let Some(winner) = results.iter().find(|r| r.is_winner) {
-                let name = game
-                    .players
-                    .iter()
-                    .find(|p| p.id == winner.player_id)
-                    .map_or("?".into(), |p| p.name.clone());
-                state.animations.push(Animation::LogMessage {
-                    text: format!("Winner: {name}"),
-                });
-            }
-
+            let total = display_results.len();
+            state.tui.reveal_tick_counter = 0; // Reset animation timer for fresh reveal
+            state.tui.overlay = Some(Overlay::RoundResults {
+                results: display_results,
+                scroll_offset: 0,
+                revealed_count: 0,
+                total_players: total,
+            });
             state.revealed_players = game.players.iter().map(|p| p.id).collect();
         }
         GamePhase::GameOver { winner } => {
             let player = game.players.iter().find(|p| p.id == *winner);
-            let name = player.map_or("?".into(), |p| p.name.clone());
+            let winner_name = player.map_or("?".into(), |p| p.name.clone());
             let is_human = player.is_some_and(|p| !p.is_bot);
-            state.tui.overlay = Some(Overlay::GameOver {
-                winner_name: name,
+
+            // Build standings from elimination_order + winner
+            let mut standings = Vec::new();
+
+            // Winner is 1st
+            standings.push(StandingEntry {
+                rank: 1,
+                player_name: winner_name.clone(),
                 is_human,
+                status: format!(
+                    "{} chips remaining",
+                    player.map_or(0, |p| p.chips + p.pot)
+                ),
+                rounds_survived: game.round,
+            });
+
+            // Eliminated players in reverse order (last eliminated = 2nd place)
+            for (i, (pid, round_elim)) in game.elimination_order.iter().rev().enumerate() {
+                let p = game.players.iter().find(|p| p.id == *pid);
+                standings.push(StandingEntry {
+                    rank: (i + 2) as u8,
+                    player_name: p.map_or("?".into(), |p| p.name.clone()),
+                    is_human: p.is_some_and(|p| !p.is_bot),
+                    status: format!("Eliminated round {round_elim}"),
+                    rounds_survived: *round_elim,
+                });
+            }
+
+            state.tui.overlay = Some(Overlay::GameOverScreen {
+                standings,
+                stats: GameOverStats {
+                    rounds_played: game.round,
+                    credits_in_pot: game.credits_in_pot,
+                    winner_name,
+                },
             });
         }
         _ => {}

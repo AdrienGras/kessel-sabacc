@@ -203,6 +203,83 @@ fn chip_conservation_across_rounds() {
     }
 }
 
+/// Verify that elimination_order is correctly populated.
+#[test]
+fn elimination_order_tracks_eliminated_players() {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let config = GameConfig {
+        players: vec![
+            ("P1".into(), true),
+            ("P2".into(), true),
+            ("P3".into(), true),
+        ],
+        starting_chips: 4, // low chips = faster eliminations
+        buy_in: 50,
+        enable_shift_tokens: false,
+        token_distribution: sabacc_core::game::TokenDistribution::None,
+    };
+
+    let state = game::new_game(config, &mut rng).unwrap();
+    assert!(state.elimination_order.is_empty());
+
+    let mut state = game::apply_action(state, Action::StartGame, &mut rng).unwrap();
+
+    let bot = BasicBot;
+    let max_iterations = 50_000;
+    let mut iterations = 0;
+
+    loop {
+        iterations += 1;
+        if iterations > max_iterations {
+            panic!("game did not terminate");
+        }
+
+        match &state.phase {
+            GamePhase::GameOver { winner } => {
+                let winner_id = *winner;
+                // Winner should NOT be in elimination_order
+                assert!(
+                    !state.elimination_order.iter().any(|(pid, _)| *pid == winner_id),
+                    "winner should not be in elimination_order"
+                );
+                // All eliminated players should be in elimination_order
+                for p in &state.players {
+                    if p.is_eliminated {
+                        assert!(
+                            state.elimination_order.iter().any(|(pid, _)| *pid == p.id),
+                            "eliminated player {} not in elimination_order",
+                            p.name
+                        );
+                    }
+                }
+                // With 3 players, 2 should be eliminated (= in elimination_order)
+                // but one player could remain with chips => only N-1 eliminated
+                let eliminated_count = state.players.iter().filter(|p| p.is_eliminated).count();
+                assert_eq!(
+                    state.elimination_order.len(),
+                    eliminated_count,
+                    "elimination_order length should match eliminated count"
+                );
+                // Round numbers should be monotonically non-decreasing
+                for window in state.elimination_order.windows(2) {
+                    assert!(
+                        window[0].1 <= window[1].1,
+                        "elimination rounds should be in order: {:?}",
+                        state.elimination_order
+                    );
+                }
+                break;
+            }
+            GamePhase::Reveal { .. } | GamePhase::RoundEnd => {
+                state = game::apply_action(state, Action::AdvanceRound, &mut rng).unwrap();
+            }
+            _ => {
+                state = game::advance_bots(state, &bot, &mut rng).unwrap();
+            }
+        }
+    }
+}
+
 /// Test with 4 players (max).
 #[test]
 fn four_player_game_terminates() {

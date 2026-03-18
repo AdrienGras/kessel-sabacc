@@ -40,13 +40,23 @@ pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
             )]);
             buf.set_line(inner.x, inner.y, &line, inner.width);
         }
-        GamePhase::Reveal { .. } | GamePhase::RoundEnd => {
+        GamePhase::Reveal { .. } => {
             let line = Line::from(vec![Span::styled(
-                "[Enter] Continue",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                "Revealing hands...",
+                Style::default().fg(Color::Yellow),
             )]);
+            buf.set_line(inner.x, inner.y, &line, inner.width);
+        }
+        GamePhase::RoundEnd => {
+            let line = Line::from(vec![
+                Span::styled(
+                    "[Enter] Next round  ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("[↑↓] Scroll", Style::default().fg(Color::DarkGray)),
+            ]);
             buf.set_line(inner.x, inner.y, &line, inner.width);
         }
         GamePhase::ImpostorReveal { pending, .. } => {
@@ -362,7 +372,17 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
         }
         Overlay::ImpostorChoice { die1, die2, .. } | Overlay::PrimeSabaccChoice { die1, die2 } => {
             let title = match overlay {
-                Overlay::ImpostorChoice { .. } => " Impostor — Choose a die ",
+                Overlay::ImpostorChoice { for_sand, has_blood_impostor, .. } => {
+                    if *has_blood_impostor {
+                        if *for_sand {
+                            " Sand Impostor — Choose a die "
+                        } else {
+                            " Blood Impostor — Choose a die "
+                        }
+                    } else {
+                        " Impostor — Choose a die "
+                    }
+                }
                 _ => " Prime Sabacc — Choose a die ",
             };
             let popup = centered_popup(area, 34, 7);
@@ -394,36 +414,11 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 }
             }
         }
-        Overlay::GameOver {
-            winner_name,
-            is_human,
-        } => {
-            let popup = centered_popup(area, 40, 9);
-            Clear.render(popup, buf);
-            let color = if *is_human { Color::Yellow } else { Color::Red };
-            let block = Block::default()
-                .title(" Game Over ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(color));
-            let inner = block.inner(popup);
-            block.render(popup, buf);
-
-            let msg = if *is_human {
-                "Victory! You win the pot!".to_string()
-            } else {
-                format!("{winner_name} wins the game.")
-            };
-
-            let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
-            buf.set_string(inner.x + 1, inner.y + 1, &msg, style);
-
-            let hint = "[Enter] New game  [q] Quit";
-            buf.set_string(
-                inner.x + 1,
-                inner.y + 3,
-                hint,
-                Style::default().fg(Color::DarkGray),
-            );
+        Overlay::RoundResults { .. } => {
+            super::results::render_round_results(area, buf, overlay);
+        }
+        Overlay::GameOverScreen { .. } => {
+            super::results::render_game_over(area, buf, overlay);
         }
     }
 }
