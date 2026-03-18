@@ -3,4 +3,4 @@ members = ["crates/sabacc-core", "crates/sabacc-cli"]
 resolver = "2"
 
 [workspace.package]
-version = "0.9.0"
+version = "0.10.0"
