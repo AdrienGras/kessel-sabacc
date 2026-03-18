@@ -629,7 +629,7 @@ crates/sabacc-cli/src/
 ├── app.rs           # AppState, TuiState, update(), Command, run_bots()
 ├── animation.rs     # Animation queue, tick, skip
 ├── events.rs        # crossterm → AppEvent (Key/Tick/Resize)
-├── ui.rs            # render() dispatch, setup screen, 3-col layout, help
+├── ui.rs            # render() dispatch, menu/setup/playing/help screens
 └── widgets/
     ├── mod.rs
     ├── card.rs      # CardWidget ASCII 8×5 + inline [S△3]
@@ -638,7 +638,8 @@ crates/sabacc-cli/src/
     ├── table.rs     # 4 cartes horizontales centrées + labels
     ├── actions.rs   # ActionBar bordée + 7 overlays (source, discard, token, target, dés, quit, gameover)
     ├── hand.rs      # 3 colonnes 1/3 : jetons ●○ | cartes centrées | tokens liste
-    └── log.rs       # Scroll PageUp/PageDown, word-wrap, préfixe ›, indicateur ▼ new
+    ├── log.rs       # Scroll PageUp/PageDown, word-wrap, préfixe ›, indicateur ▼ new
+    └── starfield.rs # Animated starfield background (shared across menu screens)
 ```
 
 ### Dépendances
@@ -654,14 +655,14 @@ clap = { version = "4", features = ["derive"] }
 ### CLI args (clap)
 
 ```
-sabacc-cli                           # menu interactif
-sabacc-cli --quick                   # 3 bots, 100cr, tokens on
+sabacc-cli                           # main menu (MainMenu screen)
+sabacc-cli --quick                   # 3 bots, 100cr, tokens on (skip menu)
 sabacc-cli --bots 2 --buy-in 50     # skip menu
 sabacc-cli --name "Lando"            # nom custom
 sabacc-cli --no-tokens               # désactive ShiftTokens
 ```
 
-### Tests : 8 tests CLI + 96 tests core
+### Tests : 8 tests CLI + 97 tests core
 
 ---
 
@@ -838,6 +839,39 @@ Utiliser un symbole (`›`) en début de chaque nouveau message et indenter les
 lignes de continuation. Le split se fait aux espaces (ou hard-break si un mot
 est trop long). Compter les **chars** pas les **bytes** pour les largeurs
 (UTF-8 multi-bytes comme `é`, `→`, `●`).
+
+### is_animating() vs is_game_animating()
+
+Le starfield a besoin de ticks (~30fps) sur les écrans menu, mais ne doit PAS
+bloquer les inputs clavier. `is_animating()` contrôle la génération de ticks
+(retourne `true` pour MainMenu/Setup/HowToPlay + game animations).
+`is_game_animating()` ne couvre que les animations de jeu (AnimationQueue,
+RoundResults reveal, RoundAnnouncement) et est utilisée pour le blocage d'input.
+Tout nouvel écran non-jeu avec animation doit suivre ce pattern.
+
+### Starfield : initialiser avec la taille réelle du terminal
+
+`Starfield::new()` doit utiliser `crossterm::terminal::size()` et non des
+dimensions hardcodées. Sinon les étoiles ne couvrent pas tout l'écran sur les
+grands terminaux. Le `-2` compense la bordure.
+
+### ASCII art : compter chars() pas len()
+
+Pour centrer du texte contenant des caractères multi-bytes (comme `█`, 3 bytes
+UTF-8 mais 1 colonne de largeur), utiliser `.chars().count()` et non `.len()`
+pour calculer la largeur d'affichage et le positionnement horizontal.
+
+### Layout sticky footer : sortir du layout flex
+
+Pour un élément toujours collé au bas de l'écran (hints), ne pas l'inclure dans
+le layout vertical flexible. Le rendre en position absolue à
+`inner.bottom().saturating_sub(1)` et réduire la zone de contenu d'1 ligne.
+
+### Description markup : {text} pour strikethrough
+
+Les descriptions de menu supportent `{text}` pour le barré via `parse_desc_line()`
+dans ui.rs. Le parser est générique — tout texte entre accolades est rendu avec
+`Modifier::CROSSED_OUT`.
 
 ---
 

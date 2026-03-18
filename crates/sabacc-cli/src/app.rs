@@ -13,6 +13,7 @@ use sabacc_core::PlayerId;
 
 use crate::animation::{Animation, AnimationQueue};
 use crate::events::AppEvent;
+use crate::widgets::starfield::Starfield;
 
 /// Number of ticks for the RoundAnnouncement auto-dismiss (~2s at 33ms/tick).
 pub const ROUND_ANNOUNCE_TOTAL_TICKS: u16 = 60;
@@ -195,8 +196,74 @@ impl SetupState {
 /// Which screen the app is on.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
+    MainMenu,
     Setup,
+    HowToPlay,
     Playing,
+}
+
+// ── Main Menu ───────────────────────────────────────────────────────
+
+/// An entry in the main menu.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MenuItem {
+    HyperspaceSabacc,
+    ClassicSabacc,
+    CustomGame,
+    HowToPlay,
+    Quit,
+}
+
+impl MenuItem {
+    pub const ALL: [MenuItem; 5] = [
+        MenuItem::HyperspaceSabacc,
+        MenuItem::ClassicSabacc,
+        MenuItem::CustomGame,
+        MenuItem::HowToPlay,
+        MenuItem::Quit,
+    ];
+
+    /// Display name shown in the menu.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::HyperspaceSabacc => "Hyperspace Sabacc",
+            Self::ClassicSabacc => "Classic Sabacc",
+            Self::CustomGame => "Custom Game",
+            Self::HowToPlay => "How to Play",
+            Self::Quit => "Quit",
+        }
+    }
+
+    /// Description shown below the menu when this item is selected.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::HyperspaceSabacc => {
+                "The full Outlaw experience — Shift Tokens, bluffs, and chaos.\n3 opponents, 100 credits, 3 tokens each. Hold on tight."
+            }
+            Self::ClassicSabacc => {
+                "Pure cards, no tricks. The way Han {stole} won the Falcon from Lando.\n3 opponents, 100 credits. Just you and the deck."
+            }
+            Self::CustomGame => {
+                "Set up your own table in the back of the cantina.\nPick your opponents, stakes, and house rules."
+            }
+            Self::HowToPlay => {
+                "Every smuggler starts somewhere.\nLearn the cards, the bets, and how not to lose your ship."
+            }
+            Self::Quit => "Walk away from the table. The galaxy isn't going anywhere.",
+        }
+    }
+}
+
+/// Main menu state.
+#[derive(Debug, Clone, Default)]
+pub struct MenuState {
+    pub selected: usize,
+}
+
+/// How to Play screen state.
+#[derive(Debug, Clone)]
+pub struct HowToPlayState {
+    pub scroll_offset: usize,
 }
 
 // ── AppState ─────────────────────────────────────────────────────────
@@ -205,7 +272,10 @@ pub enum Screen {
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub screen: Screen,
+    pub menu: MenuState,
     pub setup: SetupState,
+    pub how_to_play: HowToPlayState,
+    pub starfield: Starfield,
     pub game: Option<GameState>,
     pub tui: TuiState,
     pub animations: AnimationQueue,
@@ -216,14 +286,21 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
+        let mut rng = SmallRng::from_entropy();
+        // Use actual terminal size for starfield (fallback 120×30)
+        let (tw, th) = crossterm::terminal::size().unwrap_or((120, 30));
+        let starfield = Starfield::new(tw.saturating_sub(2), th.saturating_sub(2), &mut rng);
         Self {
-            screen: Screen::Setup,
+            screen: Screen::MainMenu,
+            menu: MenuState::default(),
             setup: SetupState::default(),
+            how_to_play: HowToPlayState { scroll_offset: 0 },
+            starfield,
             game: None,
             tui: TuiState::default(),
             animations: AnimationQueue::new(),
             log: Vec::new(),
-            rng: SmallRng::from_entropy(),
+            rng,
             revealed_players: Vec::new(),
         }
     }
@@ -243,7 +320,21 @@ impl AppState {
         start_game(state)
     }
 
+    /// Returns true if ticks should fire (~30fps). Includes both
+    /// starfield animation (menu screens) and game animations.
     pub fn is_animating(&self) -> bool {
+        // Starfield needs ticks on menu screens
+        if matches!(
+            self.screen,
+            Screen::MainMenu | Screen::Setup | Screen::HowToPlay
+        ) {
+            return true;
+        }
+        self.is_game_animating()
+    }
+
+    /// Returns true if game-specific animations are running (blocks key input).
+    pub fn is_game_animating(&self) -> bool {
         if self.animations.is_animating() {
             return true;
         }
@@ -326,9 +417,19 @@ pub fn update(mut state: AppState, event: AppEvent) -> (AppState, Command) {
         AppEvent::Resize(w, h) => {
             state.tui.terminal_width = w;
             state.tui.terminal_height = h;
+            state.starfield.resize(w, h, &mut state.rng);
             (state, Command::None)
         }
         AppEvent::Tick => {
+            // Starfield animation on menu screens
+            if matches!(
+                state.screen,
+                Screen::MainMenu | Screen::Setup | Screen::HowToPlay
+            ) {
+                state.starfield.tick();
+                return (state, Command::None);
+            }
+
             let messages = state.animations.tick(33);
             for msg in messages {
                 state.push_log(msg);
@@ -391,8 +492,8 @@ fn update_key(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
         return (state, Command::Quit);
     }
 
-    // Space skips animations
-    if state.is_animating() && key.code == KeyCode::Char(' ') {
+    // Space skips game animations (not starfield)
+    if state.is_game_animating() && key.code == KeyCode::Char(' ') {
         let messages = state.animations.skip_all();
         for msg in messages {
             state.push_log(msg);
@@ -415,15 +516,94 @@ fn update_key(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
         return (state, Command::None);
     }
 
-    // Ignore input during animations (except space/ctrl+c above)
-    if state.is_animating() {
+    // Ignore input during game animations (except space/ctrl+c above)
+    if state.is_game_animating() {
         return (state, Command::None);
     }
 
     match state.screen {
+        Screen::MainMenu => update_menu(state, key),
         Screen::Setup => update_setup(state, key),
+        Screen::HowToPlay => update_how_to_play(state, key),
         Screen::Playing => update_playing(state, key),
     }
+}
+
+// ── Main Menu ────────────────────────────────────────────────────────
+
+fn update_menu(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    let count = MenuItem::ALL.len();
+    match key.code {
+        KeyCode::Up => {
+            state.menu.selected = (state.menu.selected + count - 1) % count;
+        }
+        KeyCode::Down => {
+            state.menu.selected = (state.menu.selected + 1) % count;
+        }
+        KeyCode::Enter => {
+            let item = MenuItem::ALL[state.menu.selected];
+            match item {
+                MenuItem::HyperspaceSabacc => {
+                    // Quick game: buy_in=100, chips=5, tokens ON, 3 shifts/player, 3 bots
+                    state.setup.player_name = state.setup.player_name.clone();
+                    state.setup.num_bots = 3;
+                    state.setup.buy_in_index = 1; // 100 credits
+                    state.setup.tokens_enabled = true;
+                    state.setup.tokens_per_player = 3;
+                    state = start_game(state);
+                    return (state, Command::RunBots);
+                }
+                MenuItem::ClassicSabacc => {
+                    // Quick game: buy_in=100, chips=5, tokens OFF, 3 bots
+                    state.setup.player_name = state.setup.player_name.clone();
+                    state.setup.num_bots = 3;
+                    state.setup.buy_in_index = 1; // 100 credits
+                    state.setup.tokens_enabled = false;
+                    state = start_game(state);
+                    return (state, Command::RunBots);
+                }
+                MenuItem::CustomGame => {
+                    state.screen = Screen::Setup;
+                }
+                MenuItem::HowToPlay => {
+                    state.screen = Screen::HowToPlay;
+                    state.how_to_play.scroll_offset = 0;
+                }
+                MenuItem::Quit => {
+                    return (state, Command::Quit);
+                }
+            }
+        }
+        KeyCode::Char('q') => {
+            return (state, Command::Quit);
+        }
+        _ => {}
+    }
+    (state, Command::None)
+}
+
+// ── How to Play ──────────────────────────────────────────────────────
+
+fn update_how_to_play(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    match key.code {
+        KeyCode::Up => {
+            state.how_to_play.scroll_offset = state.how_to_play.scroll_offset.saturating_sub(1);
+        }
+        KeyCode::Down => {
+            state.how_to_play.scroll_offset += 1;
+        }
+        KeyCode::PageUp => {
+            state.how_to_play.scroll_offset = state.how_to_play.scroll_offset.saturating_sub(10);
+        }
+        KeyCode::PageDown => {
+            state.how_to_play.scroll_offset += 10;
+        }
+        KeyCode::Esc => {
+            state.screen = Screen::MainMenu;
+        }
+        _ => {}
+    }
+    (state, Command::None)
 }
 
 // ── Setup screen ─────────────────────────────────────────────────────
@@ -477,10 +657,12 @@ fn update_setup(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             state.setup.player_name.pop();
         }
         KeyCode::Char('q') if field != 0 => {
-            return (state, Command::Quit);
+            state.screen = Screen::MainMenu;
+            return (state, Command::None);
         }
         KeyCode::Esc => {
-            return (state, Command::Quit);
+            state.screen = Screen::MainMenu;
+            return (state, Command::None);
         }
         _ => {}
     }
@@ -1541,6 +1723,7 @@ mod tests {
     #[test]
     fn test_setup_navigation() {
         let mut state = AppState::new();
+        state.screen = Screen::Setup; // navigate to setup screen
         assert_eq!(state.setup.selected_field, 0);
 
         let (state, _) = update(state, AppEvent::Key(key(KeyCode::Tab)));
@@ -1553,6 +1736,7 @@ mod tests {
     #[test]
     fn test_setup_bots_adjustment() {
         let mut state = AppState::new();
+        state.screen = Screen::Setup; // navigate to setup screen
         state.setup.selected_field = 1; // bots field
         state.setup.num_bots = 3;
 

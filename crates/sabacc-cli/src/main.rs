@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If we started directly into a game and it's a bot's turn, run bots
-    if state.screen == app::Screen::Playing && !state.is_human_turn() {
+    if state.screen == app::Screen::Playing && state.game.is_some() && !state.is_human_turn() {
         state = app::run_bots(state);
     }
 

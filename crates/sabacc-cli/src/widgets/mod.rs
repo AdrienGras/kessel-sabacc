@@ -5,4 +5,5 @@ pub mod header;
 pub mod log;
 pub mod players;
 pub mod results;
+pub mod starfield;
 pub mod table;

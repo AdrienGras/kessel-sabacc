@@ -1,17 +1,216 @@
-/// Main render dispatch — responsive layout + setup screen.
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+/// Main render dispatch — responsive layout + menu screens.
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{AppState, Screen, SetupState};
+use crate::app::{AppState, MenuItem, Screen, SetupState};
 use crate::widgets;
+use crate::widgets::starfield::StarfieldWidget;
+
+/// Amber colour used throughout the UI.
+const AMBER: Color = Color::Rgb(232, 192, 80);
+
+/// ASCII art title — thick block letters with shadow.
+/// Each pair is (main line, shadow line offset +1 col +1 row).
+/// All main lines are 49 display-columns wide.
+const TITLE_ART: [&str; 5] = [
+    " ███████  █████  ██████   █████   ██████  ██████",
+    " ██      ██   ██ ██   ██ ██   ██ ██      ██     ",
+    " ███████ ███████ ██████  ███████ ██      ██     ",
+    "      ██ ██   ██ ██   ██ ██   ██ ██      ██     ",
+    " ███████ ██   ██ ██████  ██   ██  ██████  ██████",
+];
+/// Shadow layer — same text rendered 1 col right, 1 row down, in dark color.
+const TITLE_SHADOW_OFFSET: (u16, u16) = (1, 1);
+
+/// Rules text for the How to Play screen.
+const RULES_TEXT: &str = "\
+WELCOME TO THE TABLE
+────────────────────
+In the shadow of Kessel's spice mines, smugglers and
+scoundrels gather to play the galaxy's most notorious
+card game. Fortunes are won and lost in minutes. Lando
+Calrissian once bet — and lost — the Millennium Falcon
+at a table just like this one.
+
+Your goal is simple: outlast every other player at the
+table. When your chips are gone, so are you. The last
+one standing takes the pot.
+
+THE DECK
+────────
+The Sabacc deck is split into two families — Sand and
+Blood — each marked with its own colour and symbol.
+
+Each family contains:
+  · Number cards valued 1 through 6 (3 copies each)
+  · 2 Sylop cards — wildcards that copy the value of
+    your other card (powerful, but rare)
+  · 2 Impostor cards — their value is unknown until
+    the reveal, when you roll dice to determine it
+
+That makes 44 cards in total: 22 Sand, 22 Blood. Two
+separate draw piles and two discard piles sit on the
+table at all times.
+
+YOUR HAND
+─────────
+You always hold exactly two cards: one Sand, one Blood.
+Think of them as two halves of a wager — you want them
+to match as closely as possible.
+
+  Example: Sand 3 + Blood 3 = Sabacc! (difference 0)
+  Example: Sand 5 + Blood 2 = difference of 3 (bad)
+
+HAND RANKINGS
+─────────────
+From best to worst — this is what separates the legends
+from the busted:
+
+  1. PURE SABACC
+     Both cards are Sylops (Sand Sylop + Blood Sylop).
+     The rarest and most unbeatable hand in the game.
+     If you see it, savour it — most pilots never will.
+
+  2. PRIME SABACC
+     Only possible through the PrimeSabacc shift token.
+     You roll two dice and pick a value — if your cards
+     match it, you hold a hand that beats everything
+     except Pure Sabacc.
+
+  3. SYLOP SABACC
+     One Sylop + one number card. The Sylop copies the
+     number, giving you a perfect pair (difference 0).
+     Example: Sand Sylop + Blood 4 = effectively 4 + 4.
+
+  4. SABACC
+     Two number cards with the same value (difference 0).
+     Ties between Sabaccs are broken by lowest value:
+     a pair of 1s beats a pair of 6s. The humble hand
+     of a patient smuggler.
+
+  5. NON-SABACC
+     Any hand where the two values differ. The smaller
+     the difference, the better. Sand 4 + Blood 5 (diff
+     1) beats Sand 1 + Blood 6 (diff 5) every time.
+
+HOW A ROUND PLAYS OUT
+─────────────────────
+Each round consists of 3 turns. Every player acts once
+per turn, in clockwise order from the dealer.
+
+On your turn, you have two choices:
+
+  DRAW — Pick one card from the four sources on the
+  table: Sand Deck (face-down), Sand Discard (face-up),
+  Blood Deck (face-down), or Blood Discard (face-up).
+
+  After drawing, you must discard one card of the same
+  family — either the card you just drew, or the one
+  you already held. You always keep exactly 1 Sand and
+  1 Blood. Drawing costs 1 chip.
+
+  STAND — Do nothing. It's free. Sometimes the smartest
+  play is to hold your nerve and keep what you have.
+  But beware: some Shift Tokens punish those who Stand.
+
+Before choosing Draw or Stand, you may optionally play
+one Shift Token (see below).
+
+IMPOSTORS
+─────────
+Impostors are wild cards with a twist. You won't know
+their value until the reveal at the end of the round.
+
+When hands are revealed, any player holding an Impostor
+rolls two Sabacc dice (each showing 1-6) and picks one
+of the two values. If you're holding two Impostors, you
+choose for each one separately.
+
+  Example: You hold Sand Impostor + Blood 2. At reveal
+  you roll a 3 and a 5. You pick 3 — your hand becomes
+  effectively Sand 3 + Blood 2, difference 1.
+
+Impostors can save a bad hand... or make it worse. Such
+is the gambler's life on the Outer Rim.
+
+SCORING & PENALTIES
+───────────────────
+After 3 turns, all players reveal their hands. The best
+hand wins the round.
+
+  · The WINNER recovers all chips invested this round.
+    Their chips come back to their reserve.
+
+  · Losers with a SABACC hand (difference 0, but not the
+    best) lose only 1 chip as a penalty.
+
+  · Losers with a NON-SABACC hand lose chips equal to
+    the difference between their two cards.
+    Example: Sand 6 + Blood 1 = difference 5 = lose 5!
+
+Penalty chips are destroyed — removed from the game
+entirely, not given to the winner. The pot shrinks as
+players bleed out.
+
+If multiple players tie for best hand, they ALL recover
+their invested chips. Penalties still apply to the rest.
+
+ELIMINATION & VICTORY
+─────────────────────
+A player who runs out of chips is eliminated from the
+game. No chips, no seat at the table.
+
+The last player with chips remaining wins the game and
+claims the entire credit pot. May the odds be ever in
+your favour... or at least better than Lando's.
+
+SHIFT TOKENS
+────────────
+Shift Tokens are the wild cards of the metagame. Each
+player receives a random set at the start. A token can
+only be used ONCE per game (not per round). You play a
+token at the start of your turn, before choosing Draw
+or Stand.
+
+Some tokens help you:
+  · FreeDraw — Draw without paying a chip this turn.
+  · Refund — Recover 2 of your invested chips.
+  · ExtraRefund — Recover 3 invested chips.
+  · Immunity — Block all token effects from opponents
+    until the end of the round.
+
+Some tokens hurt others:
+  · GeneralTariff — Every opponent pays 1 chip.
+  · TargetTariff — One chosen opponent pays 2 chips.
+  · Embargo — The next player must Stand (no drawing).
+  · Embezzlement — Steal 1 chip from each opponent.
+  · GeneralAudit — Players who chose Stand pay 2 chips.
+  · TargetAudit — One chosen Standing player pays 3.
+  · Exhaustion — Force a target to discard their hand
+    and draw a completely new one.
+
+Some tokens change the rules:
+  · Markdown — Sylops count as 0 instead of copying.
+  · MajorFraud — All Impostors are fixed at value 6.
+  · CookTheBooks — Inverts Sabacc rankings! The worst
+    pair (6-6) becomes the best. Chaos ensues.
+  · DirectTransaction — Swap your hand with a target.
+  · PrimeSabacc — Roll dice and pick a value. If your
+    hand matches, you hold the second-best hand in the
+    game.
+
+Use them wisely. A well-timed token can turn a losing
+round into a devastating victory.";
 
 /// Top-level render function called from the main loop.
 pub fn render(frame: &mut Frame, app: &AppState) {
     match app.screen {
+        Screen::MainMenu => render_menu(frame, app),
         Screen::Setup => render_setup(frame, app),
+        Screen::HowToPlay => render_how_to_play(frame, app),
         Screen::Playing => render_playing(frame, app),
     }
 
@@ -21,10 +220,248 @@ pub fn render(frame: &mut Frame, app: &AppState) {
     }
 }
 
+// ── Shared menu chrome ──────────────────────────────────────────────
+
+/// Renders the amber rounded border + starfield background.
+/// Returns the inner area (inside the border).
+fn render_chrome(frame: &mut Frame, app: &AppState) -> Rect {
+    let area = frame.area();
+    let border = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(AMBER));
+    let inner = border.inner(area);
+    frame.render_widget(border, area);
+
+    // Starfield background
+    frame.render_widget(StarfieldWidget::new(&app.starfield), inner);
+
+    inner
+}
+
+/// Parse a description line, rendering `{text}` segments as strikethrough.
+fn parse_desc_line(line: &str) -> Line<'_> {
+    let gray = Style::default().fg(Color::Gray);
+    let strike = Style::default()
+        .fg(Color::Gray)
+        .add_modifier(Modifier::CROSSED_OUT);
+
+    let mut spans: Vec<Span> = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find('{') {
+        if start > 0 {
+            spans.push(Span::styled(&rest[..start], gray));
+        }
+        if let Some(end) = rest[start..].find('}') {
+            spans.push(Span::styled(&rest[start + 1..start + end], strike));
+            rest = &rest[start + end + 1..];
+        } else {
+            break;
+        }
+    }
+    if !rest.is_empty() {
+        spans.push(Span::styled(rest, gray));
+    }
+    Line::from(spans)
+}
+
+// ── Main Menu ───────────────────────────────────────────────────────
+
+fn render_menu(frame: &mut Frame, app: &AppState) {
+    let inner = render_chrome(frame, app);
+
+    // Reserve 1 line at the very bottom for hints (sticky footer)
+    let hints_y = inner.bottom().saturating_sub(1);
+
+    // Content area = inner minus the footer line
+    let content = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+
+    let title_height = TITLE_ART.len() as u16 + TITLE_SHADOW_OFFSET.1; // +1 for shadow
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),              // flex top
+            Constraint::Length(title_height), // title ASCII art
+            Constraint::Length(1),           // spacer between title and subtitle
+            Constraint::Length(1),           // subtitle
+            Constraint::Length(1),           // separator
+            Constraint::Length(2),           // description
+            Constraint::Length(1),           // spacer
+            Constraint::Length(5),           // menu items (5 items, compact)
+            Constraint::Min(1),              // flex bottom
+        ])
+        .split(content);
+
+    // Title ASCII art — shadow first, then main text on top
+    let title_char_width = TITLE_ART[0].chars().count() as u16;
+    let title_x = inner.x + inner.width.saturating_sub(title_char_width) / 2;
+    let shadow_style = Style::default().fg(Color::Rgb(80, 65, 25));
+    let main_style = Style::default().fg(AMBER).add_modifier(Modifier::BOLD);
+
+    // Shadow pass (offset +1 col, +1 row)
+    let (sx, sy) = TITLE_SHADOW_OFFSET;
+    for (i, line) in TITLE_ART.iter().enumerate() {
+        let y = layout[1].y + i as u16 + sy;
+        let x = title_x + sx;
+        if y < layout[1].bottom() + 1 {
+            // Render shadow char by char (only block chars cast shadow)
+            let shadow_line: String = line.chars().map(|c| if c == '█' { '█' } else { ' ' }).collect();
+            let sw = shadow_line.chars().count() as u16;
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(shadow_line, shadow_style))),
+                Rect::new(x, y, sw, 1),
+            );
+        }
+    }
+
+    // Main text pass
+    for (i, line) in TITLE_ART.iter().enumerate() {
+        let y = layout[1].y + i as u16;
+        if y < layout[1].bottom() {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    *line,
+                    main_style,
+                ))),
+                Rect::new(title_x, y, title_char_width, 1),
+            );
+        }
+    }
+
+    // Subtitle
+    let subtitle = Paragraph::new(Line::from(Span::styled(
+        "K  E  S  S  E  L",
+        Style::default().fg(Color::Gray),
+    )))
+    .alignment(Alignment::Center);
+    frame.render_widget(subtitle, layout[3]);
+
+    // Separator — thin amber line
+    let sep_width = 30u16.min(inner.width);
+    let sep_x = inner.x + (inner.width.saturating_sub(sep_width)) / 2;
+    let sep_line = "─".repeat(sep_width as usize);
+    let sep = Paragraph::new(Line::from(Span::styled(
+        sep_line,
+        Style::default().fg(AMBER),
+    )));
+    frame.render_widget(
+        sep,
+        Rect::new(sep_x, layout[4].y, sep_width, 1),
+    );
+
+    // Description — changes with selected item
+    let selected_item = MenuItem::ALL[app.menu.selected];
+    let desc_text: Vec<Line> = selected_item
+        .description()
+        .lines()
+        .map(|l| parse_desc_line(l))
+        .collect();
+    let desc = Paragraph::new(desc_text).alignment(Alignment::Center);
+    frame.render_widget(desc, layout[5]);
+
+    // Menu items — compact, no spacing between items
+    let menu_lines: Vec<Line> = MenuItem::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let selected = i == app.menu.selected;
+            let (prefix, style) = if *item == MenuItem::Quit {
+                if selected {
+                    ("▶ ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                } else {
+                    ("  ", Style::default().fg(Color::DarkGray))
+                }
+            } else if selected {
+                ("▶ ", Style::default().fg(AMBER).add_modifier(Modifier::BOLD))
+            } else {
+                ("  ", Style::default().fg(Color::DarkGray))
+            };
+            Line::from(vec![
+                Span::raw(prefix),
+                Span::styled(item.label(), style),
+            ])
+        })
+        .collect();
+    let menu = Paragraph::new(menu_lines).alignment(Alignment::Center);
+    frame.render_widget(menu, layout[7]);
+
+    // Hints — sticky footer, always at the last line of inner
+    let hints = Paragraph::new(Line::from(Span::styled(
+        "↑↓ Navigate  ·  Enter Select  ·  q Quit",
+        Style::default().fg(Color::DarkGray),
+    )))
+    .alignment(Alignment::Center);
+    frame.render_widget(hints, Rect::new(inner.x, hints_y, inner.width, 1));
+}
+
+// ── How to Play ─────────────────────────────────────────────────────
+
+fn render_how_to_play(frame: &mut Frame, app: &AppState) {
+    let inner = render_chrome(frame, app);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // title
+            Constraint::Min(1),   // content
+            Constraint::Length(1), // hints
+        ])
+        .split(inner);
+
+    // Title
+    let title = Paragraph::new(Line::from(Span::styled(
+        "HOW TO PLAY",
+        Style::default().fg(AMBER).add_modifier(Modifier::BOLD),
+    )))
+    .alignment(Alignment::Center);
+    frame.render_widget(title, layout[0]);
+
+    // Content — centered with padding
+    let content_width = 60u16.min(layout[1].width.saturating_sub(4));
+    let content_x = layout[1].x + (layout[1].width.saturating_sub(content_width)) / 2;
+    let content_area = Rect::new(content_x, layout[1].y, content_width, layout[1].height);
+
+    let rules_lines: Vec<Line> = RULES_TEXT
+        .lines()
+        .map(|l| {
+            // Section headers (all-caps lines or lines with ─) in amber
+            if l.chars().all(|c| c == '─' || c.is_whitespace()) && l.contains('─') {
+                Line::from(Span::styled(l, Style::default().fg(AMBER)))
+            } else if !l.is_empty()
+                && l.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                && !l.contains("  ")
+                && l.len() < 30
+            {
+                Line::from(Span::styled(
+                    l,
+                    Style::default().fg(AMBER).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(Span::styled(l, Style::default().fg(Color::White)))
+            }
+        })
+        .collect();
+
+    let scroll = app.how_to_play.scroll_offset as u16;
+    let para = Paragraph::new(rules_lines)
+        .scroll((scroll, 0))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, content_area);
+
+    // Hints
+    let hints = Paragraph::new(Line::from(Span::styled(
+        "↑↓/PgUp/PgDn Scroll  ·  Esc Back",
+        Style::default().fg(Color::DarkGray),
+    )))
+    .alignment(Alignment::Center);
+    frame.render_widget(hints, layout[2]);
+}
+
 // ── Setup screen ─────────────────────────────────────────────────────
 
 fn render_setup(frame: &mut Frame, app: &AppState) {
-    let area = frame.area();
+    let inner = render_chrome(frame, app);
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -33,17 +470,17 @@ fn render_setup(frame: &mut Frame, app: &AppState) {
             Constraint::Min(12),   // form
             Constraint::Length(2), // hints
         ])
-        .split(area);
+        .split(inner);
 
     // Title
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
             " KESSEL SABACC ",
             Style::default()
-                .fg(Color::Rgb(232, 192, 80))
+                .fg(AMBER)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" — Setup", Style::default().fg(Color::White)),
+        Span::styled(" — Custom Game", Style::default().fg(Color::White)),
     ]))
     .block(
         Block::default()
@@ -57,7 +494,7 @@ fn render_setup(frame: &mut Frame, app: &AppState) {
 
     // Hints
     let hints = Paragraph::new(Line::from(vec![Span::styled(
-        " Tab/↑↓: navigate  ◀▶: modify  Enter: confirm  Esc: quit",
+        " Tab/↑↓: navigate  ◀▶: modify  Enter: confirm  Esc: back",
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(hints, layout[2]);
@@ -120,7 +557,7 @@ fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
             if i == SetupState::NUM_FIELDS - 1 {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Rgb(232, 192, 80))
+                    .bg(AMBER)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -158,7 +595,7 @@ fn render_playing(frame: &mut Frame, app: &AppState) {
             area.width, area.height
         );
         let para = Paragraph::new(msg)
-            .alignment(ratatui::layout::Alignment::Center)
+            .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Red));
         let y = area.height / 2;
         frame.render_widget(para, Rect::new(area.x, y.saturating_sub(1), area.width, 3));
