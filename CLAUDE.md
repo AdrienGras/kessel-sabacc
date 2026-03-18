@@ -807,6 +807,12 @@ de `RoundEnd` → `TurnAction` du round suivant. Tout overlay intermédiaire
 (comme `RoundAnnouncement`) doit appliquer ce 2ème AdvanceRound à son dismiss,
 sinon le joueur reste bloqué en `RoundEnd` avec "[Enter] Next round".
 
+**GameOver bypass** : après le 1er AdvanceRound (Reveal→RoundEnd), vérifier si
+≤1 joueur reste. Si oui, appliquer immédiatement le 2ème AdvanceRound pour aller
+directement à GameOver, sans afficher RoundAnnouncement. Ne pas compter sur
+`check_phase_transitions` pour détecter GameOver à ce stade — elle ne le voit
+qu'après le 2ème AdvanceRound.
+
 ### Overlays auto-dismiss : timer + skip + action post-dismiss
 
 Pour un overlay qui se ferme automatiquement après N ticks :
@@ -816,6 +822,14 @@ Pour un overlay qui se ferme automatiquement après N ticks :
 4. Input handler (Enter/Space) : même fonction de dismiss
 5. La fonction de dismiss doit gérer les transitions de phase post-fermeture
    (AdvanceRound, RunBots, GameOver check, etc.)
+
+### Progress bar sur overlays auto-dismiss
+
+Utiliser `ticks_remaining` pour calculer une barre de progression visuelle :
+`filled = ((TOTAL - remaining) * bar_width) / TOTAL` (integer math, pas de float).
+Constante `ROUND_ANNOUNCE_TOTAL_TICKS` partagée entre `app.rs` (création) et
+`widgets/actions.rs` (rendu) pour éviter les magic numbers dupliqués.
+Caractères : `▰` (rempli) / `▱` (vide), couleur ambre Sand.
 
 ### Log : word-wrap + préfixe `›` pour distinguer les messages
 

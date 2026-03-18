@@ -14,6 +14,9 @@ use sabacc_core::PlayerId;
 use crate::animation::{Animation, AnimationQueue};
 use crate::events::AppEvent;
 
+/// Number of ticks for the RoundAnnouncement auto-dismiss (~2s at 33ms/tick).
+pub const ROUND_ANNOUNCE_TOTAL_TICKS: u16 = 60;
+
 // ── Log ──────────────────────────────────────────────────────────────
 
 /// A single log entry.
@@ -979,9 +982,20 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     }
                 }
                 KeyCode::Enter if revealed >= total => {
-                    // Close overlay and advance round
+                    // Close overlay and advance round (Reveal → RoundEnd)
                     state.tui.overlay = None;
                     state = apply_game_action(state, Action::AdvanceRound);
+
+                    // If only 1 player left, skip RoundAnnouncement → go straight to GameOver
+                    let only_one_left = state
+                        .game
+                        .as_ref()
+                        .is_some_and(|g| g.players.iter().filter(|p| !p.is_eliminated).count() <= 1);
+                    if only_one_left {
+                        // Apply 2nd AdvanceRound (RoundEnd → GameOver)
+                        state = apply_game_action(state, Action::AdvanceRound);
+                        return (state, Command::None);
+                    }
 
                     // If GameOver → the overlay was already set by check_phase_transitions
                     if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
@@ -994,7 +1008,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                         round,
                         players_remaining: remaining,
                         chip_leader: leader,
-                        ticks_remaining: 60, // ~2s at 33ms/tick
+                        ticks_remaining: ROUND_ANNOUNCE_TOTAL_TICKS,
                     });
                 }
                 KeyCode::Up | KeyCode::PageUp => {

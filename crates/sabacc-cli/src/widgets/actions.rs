@@ -8,7 +8,10 @@ use ratatui::widgets::{Block, Borders, Clear, Widget};
 use sabacc_core::game::GamePhase;
 use sabacc_core::shift_token::ShiftToken;
 
-use crate::app::{AppState, Overlay};
+use crate::app::{AppState, Overlay, ROUND_ANNOUNCE_TOTAL_TICKS};
+
+const PROGRESS_FILLED: char = '▰';
+const PROGRESS_EMPTY: char = '▱';
 
 /// Renders the action bar with border.
 pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
@@ -418,9 +421,9 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             round,
             players_remaining,
             chip_leader,
-            ..
+            ticks_remaining,
         } => {
-            let popup = centered_popup(area, 27, 7);
+            let popup = centered_popup(area, 27, 8);
             Clear.render(popup, buf);
             let block = Block::default()
                 .borders(Borders::ALL)
@@ -453,6 +456,22 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             )]);
             let lx = inner.x + inner.width.saturating_sub(leader_line.width() as u16) / 2;
             buf.set_line(lx, inner.y + 3, &leader_line, inner.width);
+
+            // Progress bar
+            let bar_width = inner.width.saturating_sub(2) as usize;
+            if bar_width > 0 {
+                let elapsed = ROUND_ANNOUNCE_TOTAL_TICKS.saturating_sub(*ticks_remaining);
+                let filled = (elapsed as usize * bar_width) / ROUND_ANNOUNCE_TOTAL_TICKS as usize;
+                let bar: String = std::iter::repeat_n(PROGRESS_FILLED, filled)
+                    .chain(std::iter::repeat_n(PROGRESS_EMPTY, bar_width - filled))
+                    .collect();
+                let bar_line = Line::from(vec![Span::styled(
+                    bar,
+                    Style::default().fg(Color::Rgb(232, 192, 80)),
+                )]);
+                let bx = inner.x + (inner.width.saturating_sub(bar_width as u16)) / 2;
+                buf.set_line(bx, inner.y + 5, &bar_line, inner.width);
+            }
         }
         Overlay::RoundResults { .. } => {
             super::results::render_round_results(area, buf, overlay);
