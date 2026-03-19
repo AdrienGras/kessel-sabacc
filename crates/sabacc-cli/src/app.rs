@@ -12,7 +12,7 @@ use sabacc_core::shift_token::ShiftToken;
 use sabacc_core::turn::{DiscardChoice, DrawSource, TurnAction};
 use sabacc_core::PlayerId;
 
-use crate::animation::{Animation, AnimationQueue};
+use crate::animation::{Animation, AnimationQueue, bot_highlight};
 use crate::events::AppEvent;
 use crate::widgets::starfield::Starfield;
 
@@ -575,6 +575,18 @@ fn update_key(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
         return (state, Command::None);
     }
 
+    // Global: `?` toggles help overlay from any screen
+    if key.code == KeyCode::Char('?') {
+        state.tui.show_help = !state.tui.show_help;
+        return (state, Command::None);
+    }
+
+    // If help is shown, any key closes it
+    if state.tui.show_help {
+        state.tui.show_help = false;
+        return (state, Command::None);
+    }
+
     match state.screen {
         Screen::MainMenu => update_menu(state, key),
         Screen::Setup => update_setup(state, key),
@@ -628,7 +640,7 @@ fn update_menu(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                 }
             }
         }
-        KeyCode::Char('q') => {
+        KeyCode::Char('q') | KeyCode::Esc => {
             return (state, Command::Quit);
         }
         _ => {}
@@ -652,7 +664,7 @@ fn update_how_to_play(mut state: AppState, key: KeyEvent) -> (AppState, Command)
         KeyCode::PageDown => {
             state.how_to_play.scroll_offset += 10;
         }
-        KeyCode::Esc => {
+        KeyCode::Esc | KeyCode::Char('q') => {
             state.screen = Screen::MainMenu;
         }
         _ => {}
@@ -769,18 +781,6 @@ fn start_game(mut state: AppState) -> AppState {
 // ── Playing screen ───────────────────────────────────────────────────
 
 fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
-    // Help toggle
-    if key.code == KeyCode::Char('?') {
-        state.tui.show_help = !state.tui.show_help;
-        return (state, Command::None);
-    }
-
-    // If help is shown, any key closes it
-    if state.tui.show_help {
-        state.tui.show_help = false;
-        return (state, Command::None);
-    }
-
     // Log scroll: PageUp/PageDown
     if key.code == KeyCode::PageUp {
         let page = 10; // approximate visible height
@@ -1000,7 +1000,14 @@ fn update_turn_action(mut state: AppState, key: KeyEvent) -> (AppState, Command)
 // ── Overlays ─────────────────────────────────────────────────────────
 
 fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    // GameOverScreen Esc → MainMenu (special case before generic Esc)
     if key.code == KeyCode::Esc {
+        if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
+            state.tui.overlay = None;
+            state.game = None;
+            state.screen = Screen::MainMenu;
+            return (state, Command::None);
+        }
         state.tui.overlay = None;
         return (state, Command::None);
     }
@@ -1055,10 +1062,10 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             }
 
             match key.code {
-                KeyCode::Tab | KeyCode::Down => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
                     state.tui.selected_token = (state.tui.selected_token + 1) % token_count;
                 }
-                KeyCode::BackTab | KeyCode::Up => {
+                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
                     state.tui.selected_token =
                         (state.tui.selected_token + token_count - 1) % token_count;
                 }
@@ -1111,10 +1118,10 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
 
             let token = token.clone();
             match key.code {
-                KeyCode::Tab | KeyCode::Down => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
                     state.tui.selected_target = (state.tui.selected_target + 1) % targets.len();
                 }
-                KeyCode::BackTab | KeyCode::Up => {
+                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
                     state.tui.selected_target =
                         (state.tui.selected_target + targets.len() - 1) % targets.len();
                 }
@@ -1622,6 +1629,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 }
 
                 let bot_name = player.name.clone();
+                let bot_id = player.id;
 
                 // Bot may play a token first
                 if game_state.config.enable_shift_tokens && !game_state.token_played_this_turn {
@@ -1632,7 +1640,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                                 state.animations.push(Animation::LogMessage {
                                     text: format!("{bot_name}: {token_desc}"),
                                 });
-                                state.animations.push(Animation::Pause { duration_ms: 150 });
+                                state.animations.push(bot_highlight(bot_id, 150));
                                 state.game = Some(new_state);
                                 continue; // Loop back — bot still needs Draw/Stand
                             }
@@ -1655,7 +1663,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                         state.animations.push(Animation::LogMessage {
                             text: format!("{bot_name}: {action_desc}"),
                         });
-                        state.animations.push(Animation::Pause { duration_ms: 200 });
+                        state.animations.push(bot_highlight(bot_id, 200));
                         continue; // Next bot or human
                     }
                     Err(e) => {
@@ -1693,6 +1701,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 if let Some(player) = game_state.players.iter().find(|p| p.id == pid) {
                     if player.is_bot {
                         let bot_name = player.name.clone();
+                        let bot_id = player.id;
                         let action = bot.choose_impostor(&game_state, &mut state.rng);
                         // Capture bot impostor choice for display
                         if let Action::SubmitImpostorChoice(ref choice) = action {
@@ -1703,6 +1712,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                                 state.animations.push(Animation::LogMessage {
                                     text: format!("{bot_name}: Impostor"),
                                 });
+                                state.animations.push(bot_highlight(bot_id, 150));
                                 check_phase_transitions(&mut state, &new_state);
                                 state.game = Some(new_state);
                                 continue;
@@ -1726,12 +1736,14 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 if let Some(player) = game_state.players.iter().find(|p| p.id == pid) {
                     if player.is_bot {
                         let bot_name = player.name.clone();
+                        let bot_id = player.id;
                         let action = bot.choose_prime_sabacc(&game_state, &mut state.rng);
                         match game::apply_action(game_state, action, &mut state.rng) {
                             Ok(new_state) => {
                                 state.animations.push(Animation::LogMessage {
                                     text: format!("{bot_name}: PrimeSabacc"),
                                 });
+                                state.animations.push(bot_highlight(bot_id, 150));
                                 check_phase_transitions(&mut state, &new_state);
                                 state.game = Some(new_state);
                                 continue;

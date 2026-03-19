@@ -8,6 +8,8 @@ use ratatui::widgets::{Block, BorderType, Borders, Widget};
 use crate::animation::Animation;
 use crate::app::AppState;
 
+use super::card::SAND_COLOR;
+
 /// Renders the players panel in 3-line-per-player format.
 pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     let block = Block::default()
@@ -31,7 +33,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         inner.y,
         &pot_text,
         Style::default()
-            .fg(Color::Rgb(232, 192, 80))
+            .fg(SAND_COLOR)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -45,6 +47,13 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
     // Full: 3 lines + 1 separator = 4 lines (last player: 3 lines)
     let full_lines_needed = player_count * 4 - 1;
     let use_compact_eliminated = full_lines_needed > available_height;
+
+    // If a bot is highlighted by animation, suppress `is_current` on others
+    let any_highlighted = app
+        .animations
+        .current
+        .as_ref()
+        .is_some_and(|a| matches!(a.animation, Animation::PlayerHighlight { .. }));
 
     let mut y = inner.y;
 
@@ -63,7 +72,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
             break;
         }
 
-        let is_current = i == game.current_player_idx;
+        let is_current = i == game.current_player_idx && !any_highlighted;
         let is_highlighted = is_player_highlighted(app, player.id);
 
         // Compact eliminated players if needed
@@ -81,25 +90,20 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         }
 
         // Line 1: indicator + name
+        let is_active = (is_current || is_highlighted) && !player.is_eliminated;
         let name_style = if player.is_eliminated {
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::CROSSED_OUT)
-        } else if is_current {
+        } else if is_active {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD)
-        } else if is_highlighted {
-            Style::default().fg(Color::Yellow)
         } else {
             Style::default().fg(Color::White)
         };
 
-        let indicator = if is_current && !player.is_eliminated {
-            "▶ "
-        } else {
-            "  "
-        };
+        let indicator = if is_active { "▶ " } else { "  " };
 
         let name_line = Line::from(vec![
             Span::raw(indicator),

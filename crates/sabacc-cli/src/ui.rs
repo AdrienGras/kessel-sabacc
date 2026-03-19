@@ -463,48 +463,32 @@ fn render_how_to_play(frame: &mut Frame, app: &AppState) {
 fn render_setup(frame: &mut Frame, app: &AppState) {
     let inner = render_chrome(frame, app);
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // title
-            Constraint::Min(12),   // form
-            Constraint::Length(2), // hints
-        ])
-        .split(inner);
+    // Center the form box (max 50 wide, 16 tall)
+    let form_w = 50u16.min(inner.width.saturating_sub(4));
+    let form_h = 16u16.min(inner.height.saturating_sub(2));
+    let form_x = inner.x + (inner.width.saturating_sub(form_w)) / 2;
+    let form_y = inner.y + (inner.height.saturating_sub(form_h)) / 2;
+    let form_area = Rect::new(form_x, form_y, form_w, form_h);
 
-    // Title
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " KESSEL SABACC ",
-            Style::default()
-                .fg(AMBER)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" — Custom Game", Style::default().fg(Color::White)),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
-    frame.render_widget(title, layout[0]);
-
-    // Form
-    render_setup_form(frame, layout[1], &app.setup);
-
-    // Hints
-    let hints = Paragraph::new(Line::from(vec![Span::styled(
-        " Tab/↑↓: navigate  ◀▶: modify  Enter: confirm  Esc: back",
-        Style::default().fg(Color::DarkGray),
-    )]));
-    frame.render_widget(hints, layout[2]);
+    // Form with border, title, and footer hints
+    render_setup_form(frame, form_area, &app.setup);
 }
 
 fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
+    let title_line = Line::from(Span::styled(
+        " Custom Game ",
+        Style::default().fg(AMBER).add_modifier(Modifier::BOLD),
+    ));
+    let footer_line = Line::from(Span::styled(
+        " Tab/↑↓ Navigate · ◀▶ Modify · Enter Start · Esc Back ",
+        Style::default().fg(Color::DarkGray),
+    ));
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(title_line)
+        .title_bottom(footer_line);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -536,8 +520,8 @@ fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
     } else {
         fields.push(("Tokens per player", "—".into()));
     }
-    fields.push(("", "[ START GAME ]".into()));
 
+    // Render form fields
     for (i, (label, value)) in fields.iter().enumerate() {
         if i as u16 * 2 >= inner.height {
             break;
@@ -555,22 +539,15 @@ fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
         }
 
         let value_style = if selected {
-            if i == SetupState::NUM_FIELDS - 1 {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(AMBER)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            }
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
 
         let prefix = if selected { "▶ " } else { "  " };
-        let value_y = if label.is_empty() { y } else { y + 1 };
+        let value_y = y + 1;
 
         if value_y < inner.bottom() {
             frame.render_widget(
@@ -581,6 +558,31 @@ fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
                 Rect::new(inner.x + 2, value_y, inner.width.saturating_sub(2), 1),
             );
         }
+    }
+
+    // START button — separated by a blank line
+    let start_field_idx = SetupState::NUM_FIELDS - 1;
+    let start_selected = setup.selected_field == start_field_idx;
+    let start_y = inner.y + (fields.len() as u16) * 2 + 1; // +1 for blank line separator
+
+    if start_y < inner.bottom() {
+        let btn_text = "[ START GAME ]";
+        let btn_style = if start_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(AMBER)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let prefix = if start_selected { "▶ " } else { "  " };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::raw(prefix),
+                Span::styled(btn_text, btn_style),
+            ])),
+            Rect::new(inner.x + 2, start_y, inner.width.saturating_sub(2), 1),
+        );
     }
 }
 
@@ -709,7 +711,7 @@ fn render_playing(frame: &mut Frame, app: &AppState) {
 fn render_help(frame: &mut Frame) {
     let area = frame.area();
     let w = 50u16.min(area.width);
-    let h = 16u16.min(area.height);
+    let h = 19u16.min(area.height);
     let x = (area.width.saturating_sub(w)) / 2;
     let y = (area.height.saturating_sub(h)) / 2;
     let popup = Rect::new(x, y, w, h);
@@ -730,10 +732,12 @@ fn render_help(frame: &mut Frame) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from("  Tab/←→    Navigate between actions"),
+        Line::from("  ↑↓        Navigate overlay lists"),
         Line::from("  Enter     Confirm selection"),
+        Line::from("  d         Enter draw mode (pick source)"),
         Line::from("  1-4       Direct source selection"),
         Line::from("  s         Play a ShiftToken"),
-        Line::from("  Esc       Cancel / Close"),
+        Line::from("  Esc       Cancel / Back"),
         Line::from("  Space     Skip animations"),
         Line::from("  PgUp/PgDn Scroll log"),
         Line::from("  ?         This help"),

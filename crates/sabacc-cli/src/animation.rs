@@ -34,6 +34,15 @@ pub enum Animation {
     Pause { duration_ms: u64 },
 }
 
+/// Creates a PlayerHighlight animation for a bot turn (yellow, given duration).
+pub fn bot_highlight(player_id: PlayerId, duration_ms: u64) -> Animation {
+    Animation::PlayerHighlight {
+        player_id,
+        color: Color::Yellow,
+        duration_ms,
+    }
+}
+
 impl Animation {
     /// Returns the total duration of this animation in milliseconds.
     /// Instant animations (LogMessage) return 0.
