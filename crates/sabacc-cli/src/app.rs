@@ -1311,6 +1311,35 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     }
                 }
                 KeyCode::Enter if revealed >= total => {
+                    // Push chip movement animations based on results
+                    if let Some(Overlay::RoundResults { ref results, .. }) = state.tui.overlay {
+                        for result in results {
+                            let pid = state
+                                .game
+                                .as_ref()
+                                .and_then(|g| {
+                                    g.players
+                                        .iter()
+                                        .find(|p| p.name == result.player_name)
+                                        .map(|p| p.id)
+                                })
+                                .unwrap_or(0);
+                            if result.is_winner && result.invested > 0 {
+                                state.animations.push(Animation::ChipChange {
+                                    player_id: pid,
+                                    delta: result.invested as i8,
+                                    duration_ms: 400,
+                                });
+                            } else if !result.is_winner && result.penalty > 0 {
+                                state.animations.push(Animation::ChipChange {
+                                    player_id: pid,
+                                    delta: -(result.penalty as i8),
+                                    duration_ms: 400,
+                                });
+                            }
+                        }
+                    }
+
                     // Close overlay and advance round (Reveal → RoundEnd)
                     state.tui.overlay = None;
                     state = apply_game_action(state, Action::AdvanceRound);
@@ -1399,6 +1428,16 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
         DrawSource::BloodDiscard => "Dis B",
     };
 
+    // Capture state before action for animations
+    let was_free_draw = state
+        .game
+        .as_ref()
+        .is_some_and(|g| g.free_draw_active);
+    let drawn_family = match source {
+        DrawSource::SandDeck | DrawSource::SandDiscard => sabacc_core::card::Family::Sand,
+        DrawSource::BloodDeck | DrawSource::BloodDiscard => sabacc_core::card::Family::Blood,
+    };
+
     state.tui.overlay = None;
     state.push_log(format!("You: Draw {source_name}"));
     state = apply_game_action(
@@ -1408,6 +1447,20 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
             action: TurnAction::Draw(source),
         },
     );
+
+    // Animations for the draw
+    if !was_free_draw {
+        state.animations.push(Animation::ChipChange {
+            player_id: 0,
+            delta: -1,
+            duration_ms: 400,
+        });
+    }
+    state.animations.push(Animation::CardFlash {
+        player_id: 0,
+        family: drawn_family,
+        duration_ms: 300,
+    });
 
     // If we're now in ChoosingDiscard, open that overlay
     if let Some(ref g) = state.game {
@@ -1466,6 +1519,14 @@ fn apply_game_action(mut state: AppState, action: Action) -> AppState {
 fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
     // Clear impostor choices from previous round
     state.impostor_choices.clear();
+
+    // Push a PhaseAnnounce animation before advancing
+    let round_num = state.game.as_ref().map_or(1, |g| g.round);
+    state.animations.push(Animation::PhaseAnnounce {
+        text: format!("Round {}", round_num),
+        duration_ms: 500,
+    });
+
     // The game is still in RoundEnd — apply AdvanceRound to start the next round
     if state
         .game
@@ -1478,9 +1539,7 @@ fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
     if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
         return (state, Command::None);
     }
-    if !state.is_human_turn() {
-        return (state, Command::RunBots);
-    }
+    // Let the tick handler's !is_animating() check dispatch RunBots after the animation
     (state, Command::None)
 }
 
@@ -1500,6 +1559,17 @@ fn build_round_summary(state: &AppState) -> (u8, usize, String) {
 }
 
 fn check_phase_transitions(state: &mut AppState, game: &GameState) {
+    // Push PhaseAnnounce for revelation phases
+    if matches!(
+        &game.phase,
+        GamePhase::ImpostorReveal { .. } | GamePhase::Reveal { .. }
+    ) {
+        state.animations.push(Animation::PhaseAnnounce {
+            text: "Revelation".into(),
+            duration_ms: 500,
+        });
+    }
+
     match &game.phase {
         GamePhase::Reveal { results } => {
             // Build RoundResultDisplay for each player
@@ -1734,6 +1804,24 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 let action = bot.choose_action(&game_state, &mut state.rng);
                 let action_desc = describe_action(&action, &game_state);
 
+                // Extract draw family before consuming the action
+                let draw_family = if let Action::PlayerAction {
+                    action: TurnAction::Draw(ref source),
+                    ..
+                } = &action
+                {
+                    Some(match source {
+                        DrawSource::SandDeck | DrawSource::SandDiscard => {
+                            sabacc_core::card::Family::Sand
+                        }
+                        DrawSource::BloodDeck | DrawSource::BloodDiscard => {
+                            sabacc_core::card::Family::Blood
+                        }
+                    })
+                } else {
+                    None
+                };
+
                 match game::apply_action(game_state, action, &mut state.rng) {
                     Ok(new_state) => {
                         state.game = Some(new_state);
@@ -1743,6 +1831,19 @@ pub fn run_bots(mut state: AppState) -> AppState {
                             text: format!("{bot_name}: {action_desc}"),
                         });
                         state.animations.push(bot_highlight(bot_id, 200));
+                        // Chip/card animations for Draw actions
+                        if let Some(family) = draw_family {
+                            state.animations.push(Animation::ChipChange {
+                                player_id: bot_id,
+                                delta: -1,
+                                duration_ms: 400,
+                            });
+                            state.animations.push(Animation::CardFlash {
+                                player_id: bot_id,
+                                family,
+                                duration_ms: 300,
+                            });
+                        }
                         continue; // Next bot or human
                     }
                     Err(e) => {

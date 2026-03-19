@@ -6,7 +6,6 @@ use sabacc_core::{card::Family, PlayerId};
 
 /// A single animation to play.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum Animation {
     /// Flash a card briefly.
     CardFlash {
@@ -23,15 +22,20 @@ pub enum Animation {
     /// Highlight a player's row.
     PlayerHighlight {
         player_id: PlayerId,
+        #[allow(dead_code)]
         color: Color,
         duration_ms: u64,
     },
     /// Reveal a player's cards.
+    #[allow(dead_code)]
     CardReveal { player_id: PlayerId, delay_ms: u64 },
     /// Add a message to the log.
     LogMessage { text: String },
     /// Wait without visual effect.
+    #[allow(dead_code)]
     Pause { duration_ms: u64 },
+    /// Show a phase transition text on the table.
+    PhaseAnnounce { text: String, duration_ms: u64 },
 }
 
 /// Creates a PlayerHighlight animation for a bot turn (yellow, given duration).
@@ -51,7 +55,8 @@ impl Animation {
             Self::CardFlash { duration_ms, .. }
             | Self::ChipChange { duration_ms, .. }
             | Self::PlayerHighlight { duration_ms, .. }
-            | Self::Pause { duration_ms, .. } => *duration_ms,
+            | Self::Pause { duration_ms, .. }
+            | Self::PhaseAnnounce { duration_ms, .. } => *duration_ms,
             Self::CardReveal { delay_ms, .. } => *delay_ms,
             Self::LogMessage { .. } => 0,
         }
