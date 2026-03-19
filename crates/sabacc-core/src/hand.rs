@@ -70,6 +70,18 @@ impl HandRank {
     }
 }
 
+impl std::fmt::Display for HandRank {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HandRank::PureSabacc => write!(f, "Pure Sabacc"),
+            HandRank::PrimeSabacc { value } => write!(f, "Prime Sabacc ({})", value),
+            HandRank::SylopSabacc { value } => write!(f, "Sylop Sabacc ({})", value),
+            HandRank::Sabacc { pair_value } => write!(f, "Sabacc ({})", pair_value),
+            HandRank::NonSabacc { difference } => write!(f, "Non-Sabacc (diff {})", difference),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

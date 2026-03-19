@@ -105,9 +105,16 @@ pub struct StandingEntry {
     pub rank: u8,
     pub player_name: String,
     pub is_human: bool,
-    pub status: String,
-    #[allow(dead_code)]
-    pub rounds_survived: u8,
+    pub final_chips: u8,
+    pub elimination_round: Option<u8>,
+}
+
+/// Chip history data for a single player (for Chart widget).
+#[derive(Debug, Clone)]
+pub struct ChipHistory {
+    pub player_name: String,
+    pub is_human: bool,
+    pub data: Vec<(f64, f64)>,
 }
 
 /// Aggregate stats for the game over screen.
@@ -115,7 +122,15 @@ pub struct StandingEntry {
 pub struct GameOverStats {
     pub rounds_played: u8,
     pub credits_in_pot: u32,
+    #[allow(dead_code)]
     pub winner_name: String,
+    pub human_draws: u16,
+    pub human_stands: u16,
+    pub human_tokens_played: u8,
+    pub human_best_hand: Option<String>,
+    pub human_chips_lost_penalties: u16,
+    pub human_chips_lost_tariffs: u16,
+    pub chip_histories: Vec<ChipHistory>,
 }
 
 /// Focus state for keyboard navigation.
@@ -1558,7 +1573,6 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
             let winner_name = player.map_or("?".into(), |p| p.name.clone());
             let is_human = player.is_some_and(|p| !p.is_bot);
 
-            // Build standings from elimination_order + winner
             let mut standings = Vec::new();
 
             // Winner is 1st
@@ -1566,11 +1580,8 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                 rank: 1,
                 player_name: winner_name.clone(),
                 is_human,
-                status: format!(
-                    "{} chips remaining",
-                    player.map_or(0, |p| p.chips + p.pot)
-                ),
-                rounds_survived: game.round,
+                final_chips: player.map_or(0, |p| p.chips + p.pot),
+                elimination_round: None,
             });
 
             // Eliminated players in reverse order (last eliminated = 2nd place)
@@ -1580,10 +1591,42 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                     rank: (i + 2) as u8,
                     player_name: p.map_or("?".into(), |p| p.name.clone()),
                     is_human: p.is_some_and(|p| !p.is_bot),
-                    status: format!("Eliminated round {round_elim}"),
-                    rounds_survived: *round_elim,
+                    final_chips: 0,
+                    elimination_round: Some(*round_elim),
                 });
             }
+
+            // Build chip histories for chart
+            let chip_histories: Vec<ChipHistory> = game
+                .players
+                .iter()
+                .map(|p| {
+                    let history = game
+                        .stats
+                        .get(p.id)
+                        .map(|s| &s.chips_history)
+                        .cloned()
+                        .unwrap_or_default();
+                    ChipHistory {
+                        player_name: p.name.clone(),
+                        is_human: !p.is_bot,
+                        data: history
+                            .iter()
+                            .enumerate()
+                            .map(|(i, &chips)| (i as f64, chips as f64))
+                            .collect(),
+                    }
+                })
+                .collect();
+
+            // Get human player stats
+            let human_id = game
+                .players
+                .iter()
+                .find(|p| !p.is_bot)
+                .map(|p| p.id)
+                .unwrap_or(0);
+            let human_stats = game.stats.get(human_id);
 
             state.tui.overlay = Some(Overlay::GameOverScreen {
                 standings,
@@ -1591,6 +1634,16 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                     rounds_played: game.round,
                     credits_in_pot: game.credits_in_pot,
                     winner_name,
+                    human_draws: human_stats.map_or(0, |s| s.draws_count),
+                    human_stands: human_stats.map_or(0, |s| s.stands_count),
+                    human_tokens_played: human_stats.map_or(0, |s| s.tokens_played),
+                    human_best_hand: human_stats
+                        .and_then(|s| s.best_hand.as_ref().map(|h| h.to_string())),
+                    human_chips_lost_penalties: human_stats
+                        .map_or(0, |s| s.chips_lost_to_penalties),
+                    human_chips_lost_tariffs: human_stats
+                        .map_or(0, |s| s.chips_lost_to_tariffs),
+                    chip_histories,
                 },
             });
         }
@@ -1826,14 +1879,7 @@ fn describe_action(action: &Action, _game: &GameState) -> String {
 
 /// Short display for HandRank (fits ~23 chars in log).
 fn short_rank(rank: &sabacc_core::hand::HandRank) -> String {
-    use sabacc_core::hand::HandRank;
-    match rank {
-        HandRank::PureSabacc => "PureSabacc".into(),
-        HandRank::PrimeSabacc { value } => format!("PrimeSabacc({value})"),
-        HandRank::SylopSabacc { value } => format!("SylopSabacc({value})"),
-        HandRank::Sabacc { pair_value } => format!("Sabacc({pair_value})"),
-        HandRank::NonSabacc { difference } => format!("Non({difference})"),
-    }
+    rank.to_string()
 }
 
 #[cfg(test)]

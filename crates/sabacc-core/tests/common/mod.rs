@@ -9,7 +9,11 @@ use sabacc_core::turn::TurnAction;
 use sabacc_core::PlayerId;
 
 /// Create a started game with N human players (all non-bot for precise control).
-pub fn started_game(n_players: usize, chips: u8, seed: u64) -> (sabacc_core::game::GameState, SmallRng) {
+pub fn started_game(
+    n_players: usize,
+    chips: u8,
+    seed: u64,
+) -> (sabacc_core::game::GameState, SmallRng) {
     let mut rng = SmallRng::seed_from_u64(seed);
     let players: Vec<(String, bool)> = (0..n_players)
         .map(|i| (format!("P{}", i), false))
@@ -107,12 +111,12 @@ pub fn make_hand(sand: Card, blood: Card) -> Hand {
     Hand::new(sand, blood).unwrap()
 }
 
-/// Numbered card shorthand.
+/// Numbered Sand card shorthand.
 pub fn sand(n: u8) -> Card {
     Card::number(Family::Sand, n)
 }
 
-/// Numbered card shorthand.
+/// Numbered Blood card shorthand.
 pub fn blood(n: u8) -> Card {
     Card::number(Family::Blood, n)
 }

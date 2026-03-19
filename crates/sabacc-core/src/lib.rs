@@ -13,6 +13,7 @@ pub mod player;
 pub mod round;
 pub mod scoring;
 pub mod shift_token;
+pub mod stats;
 pub mod turn;
 
 /// Unique identifier for a player in the game.

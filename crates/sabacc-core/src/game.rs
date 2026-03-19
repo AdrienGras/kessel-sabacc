@@ -8,6 +8,7 @@ use crate::round;
 use crate::scoring::{ActiveModifiers, ImpostorChoice, RoundResult};
 use crate::shift_token::ShiftToken;
 use crate::turn::{DiscardChoice, DrawSource, TurnAction};
+use crate::stats::GameStats;
 use crate::PlayerId;
 
 /// How shift tokens are distributed to players at game start.
@@ -141,6 +142,8 @@ pub struct GameState {
     pub pending_audit: PendingAudit,
     /// Order in which players were eliminated: (player_id, round_number).
     pub elimination_order: Vec<(PlayerId, u8)>,
+    /// Aggregate game statistics.
+    pub stats: GameStats,
 }
 
 /// An action that can be applied to the game state.
@@ -193,6 +196,10 @@ pub fn new_game(config: GameConfig, rng: &mut impl Rng) -> Result<GameState, Gam
         .collect();
 
     let credits_in_pot = config.buy_in * players.len() as u32;
+    let stats = GameStats::new(
+        &players.iter().map(|p| p.id).collect::<Vec<_>>(),
+        config.starting_chips,
+    );
 
     Ok(GameState {
         players,
@@ -211,6 +218,7 @@ pub fn new_game(config: GameConfig, rng: &mut impl Rng) -> Result<GameState, Gam
         free_draw_active: false,
         pending_audit: PendingAudit::default(),
         elimination_order: Vec::new(),
+        stats,
     })
 }
 
@@ -513,6 +521,9 @@ fn apply_player_action(
 
     match action {
         TurnAction::Stand => {
+            if let Some(ps) = state.stats.get_mut(player_id) {
+                ps.stands_count += 1;
+            }
             state.stood_this_turn.push(player_id);
             // Clear embargo after the embargoed player stands
             if state.embargoed_player == Some(player_id) {
@@ -536,6 +547,10 @@ fn apply_player_action(
                 DrawSource::SandDiscard => state.sand_deck.draw_from_discard()?,
                 DrawSource::BloodDiscard => state.blood_deck.draw_from_discard()?,
             };
+
+            if let Some(ps) = state.stats.get_mut(player_id) {
+                ps.draws_count += 1;
+            }
 
             state.phase = GamePhase::ChoosingDiscard {
                 player_id,
@@ -661,6 +676,26 @@ fn apply_advance_round(
                 &mut state.sand_deck,
                 &mut state.blood_deck,
             );
+            // Update per-player round stats
+            for result in &results {
+                if let Some(ps) = state.stats.get_mut(result.player_id) {
+                    ps.rounds_played += 1;
+                    if result.is_winner {
+                        ps.rounds_won += 1;
+                    }
+                    if result.penalty > 0 {
+                        ps.chips_lost_to_penalties += result.penalty as u16;
+                    }
+                    ps.update_best_hand(&result.rank);
+                }
+            }
+            // Record chip history snapshots
+            for player in &state.players {
+                if let Some(ps) = state.stats.player_stats.iter_mut().find(|s| s.player_id == player.id) {
+                    ps.chips_history.push(player.chips);
+                }
+            }
+
             // Track newly eliminated players
             let current_round = state.round;
             for player in &state.players {
@@ -770,6 +805,9 @@ fn resolve_audits(state: &mut GameState) {
             if let Some(player) = state.players.iter_mut().find(|p| p.id == *pid) {
                 player.apply_penalty(2);
             }
+            if let Some(ps) = state.stats.get_mut(*pid) {
+                ps.chips_lost_to_tariffs += 2;
+            }
         }
     }
 
@@ -778,6 +816,9 @@ fn resolve_audits(state: &mut GameState) {
         if state.stood_this_turn.contains(&target_id) && !immune.contains(&target_id) {
             if let Some(player) = state.players.iter_mut().find(|p| p.id == target_id) {
                 player.apply_penalty(3);
+            }
+            if let Some(ps) = state.stats.get_mut(target_id) {
+                ps.chips_lost_to_tariffs += 3;
             }
         }
     }
@@ -874,7 +915,11 @@ fn apply_shift_token(
             for i in 0..state.players.len() {
                 let p = &state.players[i];
                 if p.id != player_id && !p.is_eliminated && !immune.contains(&p.id) {
+                    let affected_id = state.players[i].id;
                     state.players[i].apply_penalty(1);
+                    if let Some(ps) = state.stats.get_mut(affected_id) {
+                        ps.chips_lost_to_tariffs += 1;
+                    }
                 }
             }
         }
@@ -885,6 +930,9 @@ fn apply_shift_token(
                 if let Some(target) = state.players.iter_mut().find(|p| p.id == tid) {
                     target.apply_penalty(2);
                 }
+                if let Some(ps) = state.stats.get_mut(tid) {
+                    ps.chips_lost_to_tariffs += 2;
+                }
             }
         }
 
@@ -894,8 +942,12 @@ fn apply_shift_token(
                 let p = &state.players[i];
                 if p.id != player_id && !p.is_eliminated && !immune.contains(&p.id) && p.chips > 0
                 {
+                    let affected_id = state.players[i].id;
                     state.players[i].chips -= 1;
                     stolen += 1;
+                    if let Some(ps) = state.stats.get_mut(affected_id) {
+                        ps.chips_lost_to_tariffs += 1;
+                    }
                 }
             }
             state.players[state.current_player_idx].chips += stolen;
@@ -933,6 +985,9 @@ fn apply_shift_token(
             // Remove the token first
             state.players[state.current_player_idx].remove_token(&token)?;
             state.token_played_this_turn = true;
+            if let Some(ps) = state.stats.get_mut(player_id) {
+                ps.tokens_played += 1;
+            }
 
             state.phase = GamePhase::PrimeSabaccChoice {
                 player_id,
@@ -1010,6 +1065,9 @@ fn apply_shift_token(
     // Remove token and mark as played
     state.players[state.current_player_idx].remove_token(&token)?;
     state.token_played_this_turn = true;
+    if let Some(ps) = state.stats.get_mut(player_id) {
+        ps.tokens_played += 1;
+    }
 
     Ok(state)
 }
