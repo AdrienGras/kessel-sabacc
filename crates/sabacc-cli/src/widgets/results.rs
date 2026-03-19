@@ -245,7 +245,7 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
     };
 
     let content_h = (standings.len() as u16 + 14).max(16);
-    let popup_w = (area.width.saturating_sub(4)).min(90);
+    let popup_w = area.width.saturating_sub(4); // full width minus margin
     let popup_h = (area.height.saturating_sub(2)).min(content_h + 4);
     let popup = centered_popup(area, popup_w, popup_h);
     Clear.render(popup, buf);
@@ -295,11 +295,7 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
             break;
         }
 
-        let (marker, color) = if entry.rank == 1 {
-            ("★", WINNER_COLOR)
-        } else {
-            (" ", Color::Gray)
-        };
+        let marker = if entry.rank == 1 { "★" } else { " " };
 
         let rank_str = match entry.rank {
             1 => "1st".to_string(),
@@ -314,14 +310,12 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
             format!("{} chips", entry.final_chips)
         };
 
-        let name_style = if entry.is_human && entry.rank == 1 {
+        let name_style = if entry.rank == 1 {
             Style::default()
-                .fg(WINNER_COLOR)
+                .fg(entry.chart_color)
                 .add_modifier(Modifier::BOLD)
-        } else if entry.rank == 1 {
-            Style::default().fg(WINNER_COLOR)
         } else {
-            Style::default().fg(color)
+            Style::default().fg(entry.chart_color)
         };
 
         let line_text = format!("{marker} {rank_str}  {:<12} {}", entry.player_name, status);
@@ -421,27 +415,14 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
             .max()
             .unwrap_or(6) as f64;
 
-        let colors = [
-            Color::Rgb(232, 192, 80), // Sand amber (human or first)
-            Color::Rgb(232, 72, 72),  // Blood red
-            Color::Cyan,
-            Color::Green,
-        ];
-
         let datasets: Vec<Dataset> = stats
             .chip_histories
             .iter()
-            .enumerate()
-            .map(|(i, h)| {
-                let color = if h.is_human {
-                    colors[0]
-                } else {
-                    colors.get(i).copied().unwrap_or(Color::Gray)
-                };
+            .map(|h| {
                 Dataset::default()
                     .name(h.player_name.as_str())
                     .marker(symbols::Marker::Braille)
-                    .style(Style::default().fg(color))
+                    .style(Style::default().fg(h.chart_color))
                     .graph_type(GraphType::Line)
                     .data(&h.data)
             })

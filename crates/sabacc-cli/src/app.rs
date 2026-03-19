@@ -99,21 +99,30 @@ pub struct RoundResultDisplay {
     pub impostor_values: (Option<u8>, Option<u8>),
 }
 
+/// Chart color palette: human gets amber, bots get distinct colors.
+pub const CHART_COLORS: [ratatui::style::Color; 4] = [
+    ratatui::style::Color::Rgb(232, 192, 80), // Sand amber (human)
+    ratatui::style::Color::Rgb(232, 72, 72),  // Blood red
+    ratatui::style::Color::Cyan,
+    ratatui::style::Color::Green,
+];
+
 /// A single entry in the final standings.
 #[derive(Debug, Clone)]
 pub struct StandingEntry {
     pub rank: u8,
     pub player_name: String,
-    pub is_human: bool,
     pub final_chips: u8,
     pub elimination_round: Option<u8>,
+    /// Color matching the chart curve for this player.
+    pub chart_color: ratatui::style::Color,
 }
 
 /// Chip history data for a single player (for Chart widget).
 #[derive(Debug, Clone)]
 pub struct ChipHistory {
     pub player_name: String,
-    pub is_human: bool,
+    pub chart_color: ratatui::style::Color,
     pub data: Vec<(f64, f64)>,
 }
 
@@ -1571,17 +1580,34 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
         GamePhase::GameOver { winner } => {
             let player = game.players.iter().find(|p| p.id == *winner);
             let winner_name = player.map_or("?".into(), |p| p.name.clone());
-            let is_human = player.is_some_and(|p| !p.is_bot);
+
+            // Assign chart colors: human=amber, bots cycle through remaining colors
+            let mut player_colors: std::collections::HashMap<u8, ratatui::style::Color> =
+                std::collections::HashMap::new();
+            let mut bot_color_idx = 1usize; // start at index 1 (amber=0 reserved for human)
+            for p in &game.players {
+                if !p.is_bot {
+                    player_colors.insert(p.id, CHART_COLORS[0]);
+                } else {
+                    let color = CHART_COLORS
+                        .get(bot_color_idx)
+                        .copied()
+                        .unwrap_or(ratatui::style::Color::Gray);
+                    player_colors.insert(p.id, color);
+                    bot_color_idx += 1;
+                }
+            }
 
             let mut standings = Vec::new();
 
             // Winner is 1st
+            let winner_id = player.map_or(0, |p| p.id);
             standings.push(StandingEntry {
                 rank: 1,
                 player_name: winner_name.clone(),
-                is_human,
                 final_chips: player.map_or(0, |p| p.chips + p.pot),
                 elimination_round: None,
+                chart_color: player_colors.get(&winner_id).copied().unwrap_or(ratatui::style::Color::Gray),
             });
 
             // Eliminated players in reverse order (last eliminated = 2nd place)
@@ -1590,9 +1616,9 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                 standings.push(StandingEntry {
                     rank: (i + 2) as u8,
                     player_name: p.map_or("?".into(), |p| p.name.clone()),
-                    is_human: p.is_some_and(|p| !p.is_bot),
                     final_chips: 0,
                     elimination_round: Some(*round_elim),
+                    chart_color: player_colors.get(pid).copied().unwrap_or(ratatui::style::Color::Gray),
                 });
             }
 
@@ -1609,7 +1635,7 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                         .unwrap_or_default();
                     ChipHistory {
                         player_name: p.name.clone(),
-                        is_human: !p.is_bot,
+                        chart_color: player_colors.get(&p.id).copied().unwrap_or(ratatui::style::Color::Gray),
                         data: history
                             .iter()
                             .enumerate()
