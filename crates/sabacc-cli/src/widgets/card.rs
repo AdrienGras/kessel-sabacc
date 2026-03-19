@@ -21,6 +21,8 @@ pub struct CardWidget {
     pub face_down: bool,
     pub selected: bool,
     pub highlighted: bool,
+    /// Resolved impostor die value (shown instead of '?').
+    pub resolved_impostor: Option<u8>,
 }
 
 impl CardWidget {
@@ -31,6 +33,7 @@ impl CardWidget {
             face_down,
             selected: false,
             highlighted: false,
+            resolved_impostor: None,
         }
     }
 
@@ -41,6 +44,7 @@ impl CardWidget {
             face_down: true,
             selected: false,
             highlighted: false,
+            resolved_impostor: None,
         }
     }
 
@@ -63,6 +67,7 @@ impl CardWidget {
         }
         match &self.value {
             Some(CardValue::Sylop) => "◎",
+            Some(CardValue::Impostor) if self.resolved_impostor.is_some() => "?→",
             Some(CardValue::Impostor) => "?",
             _ => match &self.family {
                 Some(Family::Sand) => "△",
@@ -95,7 +100,12 @@ impl CardWidget {
         match &self.value {
             Some(CardValue::Number(n)) => format!("{n}"),
             Some(CardValue::Sylop) => String::new(),
-            Some(CardValue::Impostor) => String::new(),
+            Some(CardValue::Impostor) => {
+                match self.resolved_impostor {
+                    Some(v) => format!("{v}"),
+                    None => String::new(),
+                }
+            }
             None => "▓▓".into(),
         }
     }

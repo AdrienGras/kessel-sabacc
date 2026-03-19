@@ -7,6 +7,7 @@ use sabacc_core::bot::BasicBot;
 use sabacc_core::card::Card;
 use sabacc_core::game::{self, Action, GameConfig, GamePhase, GameState, TokenDistribution};
 use sabacc_core::player::Player;
+use sabacc_core::scoring::ImpostorChoice;
 use sabacc_core::shift_token::ShiftToken;
 use sabacc_core::turn::{DiscardChoice, DrawSource, TurnAction};
 use sabacc_core::PlayerId;
@@ -17,6 +18,11 @@ use crate::widgets::starfield::Starfield;
 
 /// Number of ticks for the RoundAnnouncement auto-dismiss (~2s at 33ms/tick).
 pub const ROUND_ANNOUNCE_TOTAL_TICKS: u16 = 60;
+
+/// Dice rolling animation: die 1 locks after ~660ms (20 ticks × 33ms).
+pub const DICE_ROLL_TICKS_DIE1: u16 = 20;
+/// Dice rolling animation: die 2 locks after ~1.15s (35 ticks × 33ms).
+pub const DICE_ROLL_TICKS_DIE2: u16 = 35;
 
 // ── Log ──────────────────────────────────────────────────────────────
 
@@ -46,10 +52,16 @@ pub enum Overlay {
         for_sand: bool,
         sand_choice: Option<u8>,
         has_blood_impostor: bool,
+        rolling_tick: u16,
+        die1_locked: bool,
+        die2_locked: bool,
     },
     PrimeSabaccChoice {
         die1: u8,
         die2: u8,
+        rolling_tick: u16,
+        die1_locked: bool,
+        die2_locked: bool,
     },
     QuitConfirm,
     RoundResults {
@@ -83,6 +95,8 @@ pub struct RoundResultDisplay {
     pub chips_after: u8,
     pub penalty: u8,
     pub penalty_reason: String,
+    /// Resolved impostor values: (sand_choice, blood_choice).
+    pub impostor_values: (Option<u8>, Option<u8>),
 }
 
 /// A single entry in the final standings.
@@ -284,6 +298,8 @@ pub struct AppState {
     pub log: Vec<LogEntry>,
     pub rng: SmallRng,
     pub revealed_players: Vec<PlayerId>,
+    /// Impostor die choices for the current round (used for display).
+    pub impostor_choices: Vec<ImpostorChoice>,
 }
 
 impl AppState {
@@ -304,6 +320,7 @@ impl AppState {
             log: Vec::new(),
             rng,
             revealed_players: Vec::new(),
+            impostor_choices: Vec::new(),
         }
     }
 
@@ -339,6 +356,15 @@ impl AppState {
     pub fn is_game_animating(&self) -> bool {
         if self.animations.is_animating() {
             return true;
+        }
+        // Dice rolling animation
+        if let Some(
+            Overlay::ImpostorChoice { die2_locked, .. } |
+            Overlay::PrimeSabaccChoice { die2_locked, .. }
+        ) = &self.tui.overlay {
+            if !*die2_locked {
+                return true;
+            }
         }
         // RoundResults reveal animation also counts as animating (keeps ticks firing)
         if let Some(Overlay::RoundResults {
@@ -432,6 +458,22 @@ pub fn update(mut state: AppState, event: AppEvent) -> (AppState, Command) {
                 return (state, Command::None);
             }
 
+            // Dice rolling animation tick
+            if let Some(
+                Overlay::ImpostorChoice { rolling_tick, die1_locked, die2_locked, .. } |
+                Overlay::PrimeSabaccChoice { rolling_tick, die1_locked, die2_locked, .. }
+            ) = &mut state.tui.overlay {
+                if !*die2_locked {
+                    *rolling_tick += 1;
+                    if *rolling_tick >= DICE_ROLL_TICKS_DIE1 && !*die1_locked {
+                        *die1_locked = true;
+                    }
+                    if *rolling_tick >= DICE_ROLL_TICKS_DIE2 {
+                        *die2_locked = true;
+                    }
+                }
+            }
+
             let messages = state.animations.tick(33);
             for msg in messages {
                 state.push_log(msg);
@@ -499,6 +541,16 @@ fn update_key(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
         let messages = state.animations.skip_all();
         for msg in messages {
             state.push_log(msg);
+        }
+        // Skip dice rolling animation
+        if let Some(
+            Overlay::ImpostorChoice { die1_locked, die2_locked, .. } |
+            Overlay::PrimeSabaccChoice { die1_locked, die2_locked, .. }
+        ) = &mut state.tui.overlay {
+            if !*die2_locked {
+                *die1_locked = true;
+                *die2_locked = true;
+            }
         }
         // Also skip RoundResults reveal animation
         if let Some(Overlay::RoundResults {
@@ -813,6 +865,9 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                         for_sand: has_sand_impostor,
                         sand_choice: None,
                         has_blood_impostor,
+                        rolling_tick: 0,
+                        die1_locked: false,
+                        die2_locked: false,
                     });
                 }
                 (state, Command::None)
@@ -830,7 +885,13 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             let d1 = *die1;
             let d2 = *die2;
             if pid == 0 {
-                state.tui.overlay = Some(Overlay::PrimeSabaccChoice { die1: d1, die2: d2 });
+                state.tui.overlay = Some(Overlay::PrimeSabaccChoice {
+                    die1: d1,
+                    die2: d2,
+                    rolling_tick: 0,
+                    die1_locked: false,
+                    die2_locked: false,
+                });
                 (state, Command::None)
             } else {
                 (state, Command::RunBots)
@@ -1088,82 +1149,117 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             for_sand,
             sand_choice,
             has_blood_impostor,
-        }) => match key.code {
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                state.tui.selected_die = 1 - state.tui.selected_die;
+            die2_locked,
+            ..
+        }) => {
+            // Block all input while dice are rolling (Space skip handled above)
+            if !die2_locked {
+                // Enter also skips the animation
+                if key.code == KeyCode::Enter || key.code == KeyCode::Char(' ') {
+                    if let Some(
+                        Overlay::ImpostorChoice { die1_locked, die2_locked, .. }
+                    ) = &mut state.tui.overlay {
+                        *die1_locked = true;
+                        *die2_locked = true;
+                    }
+                }
+                return (state, Command::None);
             }
-            KeyCode::Enter => {
-                let chosen = if state.tui.selected_die == 0 {
-                    die1
-                } else {
-                    die2
-                };
-
-                if for_sand && has_blood_impostor {
-                    // Double impostor: Sand chosen, now need Blood choice
-                    state.tui.selected_die = 0;
-                    let new_die1 = (state.rng.next_u64() % 6 + 1) as u8;
-                    let new_die2 = (state.rng.next_u64() % 6 + 1) as u8;
-                    state.push_log(format!("Sand Imp→{chosen}"));
-                    state.tui.overlay = Some(Overlay::ImpostorChoice {
-                        die1: new_die1,
-                        die2: new_die2,
-                        for_sand: false,
-                        sand_choice: Some(chosen),
-                        has_blood_impostor: true,
-                    });
-                } else {
-                    // Single impostor or Blood step of double impostor
-                    let final_sand = if for_sand { Some(chosen) } else { sand_choice };
-                    let final_blood = if for_sand { None } else { Some(chosen) };
-
-                    let choice = sabacc_core::scoring::ImpostorChoice {
-                        player_id: 0,
-                        die1,
-                        die2,
-                        sand_choice: final_sand,
-                        blood_choice: final_blood,
+            match key.code {
+                KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                    state.tui.selected_die = 1 - state.tui.selected_die;
+                }
+                KeyCode::Enter => {
+                    let chosen = if state.tui.selected_die == 0 {
+                        die1
+                    } else {
+                        die2
                     };
 
+                    if for_sand && has_blood_impostor {
+                        // Double impostor: Sand chosen, now need Blood choice
+                        state.tui.selected_die = 0;
+                        let new_die1 = (state.rng.next_u64() % 6 + 1) as u8;
+                        let new_die2 = (state.rng.next_u64() % 6 + 1) as u8;
+                        state.push_log(format!("Sand Imp→{chosen}"));
+                        state.tui.overlay = Some(Overlay::ImpostorChoice {
+                            die1: new_die1,
+                            die2: new_die2,
+                            for_sand: false,
+                            sand_choice: Some(chosen),
+                            has_blood_impostor: true,
+                            rolling_tick: 0,
+                            die1_locked: false,
+                            die2_locked: false,
+                        });
+                    } else {
+                        // Single impostor or Blood step of double impostor
+                        let final_sand = if for_sand { Some(chosen) } else { sand_choice };
+                        let final_blood = if for_sand { None } else { Some(chosen) };
+
+                        let choice = ImpostorChoice {
+                            player_id: 0,
+                            die1,
+                            die2,
+                            sand_choice: final_sand,
+                            blood_choice: final_blood,
+                        };
+
+                        state.impostor_choices.push(choice.clone());
+                        state.tui.overlay = None;
+                        state.tui.selected_die = 0;
+                        let label = if has_blood_impostor { "Blood Imp" } else { "Impostor" };
+                        state.push_log(format!("{label}→{chosen}"));
+                        state =
+                            apply_game_action(state, Action::SubmitImpostorChoice(choice));
+                        if !state.is_human_turn() {
+                            return (state, Command::RunBots);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Some(Overlay::PrimeSabaccChoice { die1, die2, die2_locked, .. }) => {
+            // Block all input while dice are rolling
+            if !die2_locked {
+                if key.code == KeyCode::Enter || key.code == KeyCode::Char(' ') {
+                    if let Some(
+                        Overlay::PrimeSabaccChoice { die1_locked, die2_locked, .. }
+                    ) = &mut state.tui.overlay {
+                        *die1_locked = true;
+                        *die2_locked = true;
+                    }
+                }
+                return (state, Command::None);
+            }
+            match key.code {
+                KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                    state.tui.selected_die = 1 - state.tui.selected_die;
+                }
+                KeyCode::Enter => {
+                    let chosen = if state.tui.selected_die == 0 {
+                        die1
+                    } else {
+                        die2
+                    };
                     state.tui.overlay = None;
                     state.tui.selected_die = 0;
-                    let label = if has_blood_impostor { "Blood Imp" } else { "Impostor" };
-                    state.push_log(format!("{label}→{chosen}"));
-                    state =
-                        apply_game_action(state, Action::SubmitImpostorChoice(choice));
+                    state.push_log(format!("PrimeSabacc→{chosen}"));
+                    state = apply_game_action(
+                        state,
+                        Action::SubmitPrimeSabaccChoice {
+                            player_id: 0,
+                            chosen_value: chosen,
+                        },
+                    );
                     if !state.is_human_turn() {
                         return (state, Command::RunBots);
                     }
                 }
+                _ => {}
             }
-            _ => {}
-        },
-        Some(Overlay::PrimeSabaccChoice { die1, die2 }) => match key.code {
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                state.tui.selected_die = 1 - state.tui.selected_die;
-            }
-            KeyCode::Enter => {
-                let chosen = if state.tui.selected_die == 0 {
-                    die1
-                } else {
-                    die2
-                };
-                state.tui.overlay = None;
-                state.tui.selected_die = 0;
-                state.push_log(format!("PrimeSabacc→{chosen}"));
-                state = apply_game_action(
-                    state,
-                    Action::SubmitPrimeSabaccChoice {
-                        player_id: 0,
-                        chosen_value: chosen,
-                    },
-                );
-                if !state.is_human_turn() {
-                    return (state, Command::RunBots);
-                }
-            }
-            _ => {}
-        },
+        }
         Some(Overlay::RoundResults {
             revealed_count,
             total_players,
@@ -1337,6 +1433,8 @@ fn apply_game_action(mut state: AppState, action: Action) -> AppState {
 /// Applies AdvanceRound to transition from RoundEnd → TurnAction,
 /// then triggers RunBots if needed.
 fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
+    // Clear impostor choices from previous round
+    state.impostor_choices.clear();
     // The game is still in RoundEnd — apply AdvanceRound to start the next round
     if state
         .game
@@ -1416,6 +1514,13 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                         )
                     });
 
+                // Look up impostor choices for this player
+                let impostor_values = state
+                    .impostor_choices
+                    .iter()
+                    .find(|c| c.player_id == result.player_id)
+                    .map_or((None, None), |c| (c.sand_choice, c.blood_choice));
+
                 display_results.push(RoundResultDisplay {
                     player_name: name,
                     rank_str,
@@ -1427,6 +1532,7 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
                     chips_after,
                     penalty: result.penalty,
                     penalty_reason,
+                    impostor_values,
                 });
             }
 
@@ -1588,6 +1694,10 @@ pub fn run_bots(mut state: AppState) -> AppState {
                     if player.is_bot {
                         let bot_name = player.name.clone();
                         let action = bot.choose_impostor(&game_state, &mut state.rng);
+                        // Capture bot impostor choice for display
+                        if let Action::SubmitImpostorChoice(ref choice) = action {
+                            state.impostor_choices.push(choice.clone());
+                        }
                         match game::apply_action(game_state, action, &mut state.rng) {
                             Ok(new_state) => {
                                 state.animations.push(Animation::LogMessage {

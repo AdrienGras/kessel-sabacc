@@ -103,8 +103,16 @@ fn render_cards(area: Rect, buf: &mut Buffer, app: &AppState) {
             ])
             .split(card_area);
 
-        CardWidget::from_card(&hand.sand, false).render(cols[0], buf);
-        CardWidget::from_card(&hand.blood, false).render(cols[2], buf);
+        // Look up resolved impostor values for the human player
+        let impostor = app.impostor_choices.iter().find(|c| c.player_id == 0);
+        let mut sand_widget = CardWidget::from_card(&hand.sand, false);
+        let mut blood_widget = CardWidget::from_card(&hand.blood, false);
+        if let Some(choice) = impostor {
+            sand_widget.resolved_impostor = choice.sand_choice;
+            blood_widget.resolved_impostor = choice.blood_choice;
+        }
+        sand_widget.render(cols[0], buf);
+        blood_widget.render(cols[2], buf);
     }
 }
 

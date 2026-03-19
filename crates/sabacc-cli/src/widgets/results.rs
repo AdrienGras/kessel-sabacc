@@ -123,11 +123,13 @@ pub fn render_round_results(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
                 }),
         );
 
-        // Card inline display
-        let (sand_str, sand_color) =
-            super::card::CardWidget::from_card(&result.hand.0, false).inline_string();
-        let (blood_str, blood_color) =
-            super::card::CardWidget::from_card(&result.hand.1, false).inline_string();
+        // Card inline display (with resolved impostor values)
+        let mut sand_widget = super::card::CardWidget::from_card(&result.hand.0, false);
+        let mut blood_widget = super::card::CardWidget::from_card(&result.hand.1, false);
+        sand_widget.resolved_impostor = result.impostor_values.0;
+        blood_widget.resolved_impostor = result.impostor_values.1;
+        let (sand_str, sand_color) = sand_widget.inline_string();
+        let (blood_str, blood_color) = blood_widget.inline_string();
 
         if y_pos + 1 < left.height {
             let card_y = left.y + y_pos + 1;

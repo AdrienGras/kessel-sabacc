@@ -13,6 +13,7 @@ use crate::app::{AppState, Overlay, ROUND_ANNOUNCE_TOTAL_TICKS};
 const PROGRESS_FILLED: char = '▰';
 const PROGRESS_EMPTY: char = '▱';
 
+
 /// Renders the action bar with border.
 pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
     let block = Block::default()
@@ -357,7 +358,11 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 buf.set_string(inner.x + 2, inner.y + i as u16, name, style);
             }
         }
-        Overlay::ImpostorChoice { die1, die2, .. } | Overlay::PrimeSabaccChoice { die1, die2 } => {
+        Overlay::ImpostorChoice {
+            die1, die2, rolling_tick, die1_locked, die2_locked, ..
+        } | Overlay::PrimeSabaccChoice {
+            die1, die2, rolling_tick, die1_locked, die2_locked,
+        } => {
             let title = match overlay {
                 Overlay::ImpostorChoice { for_sand, has_blood_impostor, .. } => {
                     if *has_blood_impostor {
@@ -372,7 +377,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 }
                 _ => " Prime Sabacc — Choose a die ",
             };
-            let popup = centered_popup(area, 34, 7);
+            let popup = centered_popup(area, 34, 9);
             Clear.render(popup, buf);
             let block = Block::default()
                 .title(title)
@@ -382,25 +387,81 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             let inner = block.inner(popup);
             block.render(popup, buf);
 
-            let d1 = *die1;
-            let d2 = *die2;
-            let options = [format!("Die 1: {d1}"), format!("Die 2: {d2}")];
-            for (i, opt) in options.iter().enumerate() {
-                let selected = i == app.tui.selected_die;
-                let style = if selected {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Magenta)
-                        .add_modifier(Modifier::BOLD)
+            let both_locked = *die1_locked && *die2_locked;
+
+            // Determine displayed values (pseudo-random during roll, real when locked)
+            let display_d1: u8 = if *die1_locked {
+                *die1
+            } else {
+                (rolling_tick.wrapping_mul(7).wrapping_add(3) % 6 + 1) as u8
+            };
+            let display_d2: u8 = if *die2_locked {
+                *die2
+            } else {
+                (rolling_tick.wrapping_mul(11).wrapping_add(7) % 6 + 1) as u8
+            };
+
+            // Die box: 5 wide × 3 tall (╭───╮ │ N │ ╰───╯)
+            let die_box_w: u16 = 5;
+            let die_box_h: u16 = 3;
+            let gap: u16 = 6;
+            let total_w = die_box_w * 2 + gap;
+            let start_x = inner.x + inner.width.saturating_sub(total_w) / 2;
+            let start_y = inner.y + 1;
+
+            let selected = app.tui.selected_die;
+
+            for (i, (display_val, locked)) in
+                [(display_d1, *die1_locked), (display_d2, *die2_locked)].iter().enumerate()
+            {
+                let bx = start_x + (i as u16) * (die_box_w + gap);
+                let by = start_y;
+
+                // Border: white if selected (and done), dark gray otherwise
+                let border_color = if both_locked && selected == i {
+                    Color::White
                 } else {
-                    Style::default().fg(Color::White)
+                    Color::DarkGray
                 };
-                let prefix = if selected { "▶ " } else { "  " };
-                if (i as u16 + 1) < inner.height {
-                    buf.set_string(inner.x, inner.y + 1 + i as u16, prefix, style);
-                    buf.set_string(inner.x + 2, inner.y + 1 + i as u16, opt, style);
-                }
+                let border_style = Style::default().fg(border_color);
+
+                buf.set_string(bx, by, "┌───┐", border_style);
+                buf.set_string(bx, by + 1, "│", border_style);
+                buf.set_string(bx + die_box_w - 1, by + 1, "│", border_style);
+                buf.set_string(bx, by + 2, "└───┘", border_style);
+
+                // Centered digit
+                let digit_color = if *locked { Color::Yellow } else { Color::Magenta };
+                let digit_style = Style::default().fg(digit_color).add_modifier(Modifier::BOLD);
+                buf.set_string(bx + 2, by + 1, format!("{display_val}"), digit_style);
+
+                // Label below
+                let label = format!("Die {}", i + 1);
+                let label_color = if both_locked && selected == i {
+                    Color::Rgb(232, 192, 80)
+                } else {
+                    Color::DarkGray
+                };
+                let label_x = bx + (die_box_w.saturating_sub(label.len() as u16)) / 2;
+                buf.set_string(label_x, by + die_box_h, &label, Style::default().fg(label_color));
             }
+
+            // Hint line
+            let hint = if !both_locked {
+                Line::from(Span::styled(
+                    "Rolling...",
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(vec![
+                    Span::styled("← →", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(" Navigate  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(" Confirm", Style::default().fg(Color::DarkGray)),
+                ])
+            };
+            let hint_x = inner.x + inner.width.saturating_sub(hint.width() as u16) / 2;
+            buf.set_line(hint_x, inner.y + inner.height - 1, &hint, inner.width);
         }
         Overlay::RoundAnnouncement {
             round,
