@@ -1301,7 +1301,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             let total = total_players;
             let scroll = scroll_offset;
             match key.code {
-                KeyCode::Char(' ') if revealed < total => {
+                KeyCode::Char(' ') => {
                     // Skip animation — reveal all
                     if let Some(Overlay::RoundResults {
                         revealed_count, ..
@@ -1310,9 +1310,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                         *revealed_count = total;
                     }
                 }
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    // Skip reveal if still animating, then dismiss
-                    // (single Enter always dismisses)
+                KeyCode::Enter if revealed >= total => {
                     // Close overlay and advance round (Reveal → RoundEnd)
                     state.tui.overlay = None;
                     state = apply_game_action(state, Action::AdvanceRound);
@@ -1411,9 +1409,6 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
         },
     );
 
-    // No animations for human draw — the discard overlay opens immediately
-    // and would cover the animations. Bot draws have animations instead.
-
     // If we're now in ChoosingDiscard, open that overlay
     if let Some(ref g) = state.game {
         if let GamePhase::ChoosingDiscard {
@@ -1471,7 +1466,6 @@ fn apply_game_action(mut state: AppState, action: Action) -> AppState {
 fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
     // Clear impostor choices from previous round
     state.impostor_choices.clear();
-
     // The game is still in RoundEnd — apply AdvanceRound to start the next round
     if state
         .game
@@ -1484,12 +1478,10 @@ fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
     if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
         return (state, Command::None);
     }
-    // Check if bots need to play
     if !state.is_human_turn() {
-        (state, Command::RunBots)
-    } else {
-        (state, Command::None)
+        return (state, Command::RunBots);
     }
+    (state, Command::None)
 }
 
 /// Builds a summary for the RoundAnnouncement overlay.
@@ -1722,34 +1714,12 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 if game_state.config.enable_shift_tokens && !game_state.token_played_this_turn {
                     if let Some(token_action) = bot.choose_token(&game_state, &mut state.rng) {
                         let token_desc = describe_action(&token_action, &game_state);
-                        // Snapshot chips before token to detect changes
-                        let chips_before: Vec<(PlayerId, u8)> = game_state
-                            .players
-                            .iter()
-                            .map(|p| (p.id, p.chips))
-                            .collect();
                         match game::apply_action(game_state, token_action, &mut state.rng) {
                             Ok(new_state) => {
                                 state.animations.push(Animation::LogMessage {
                                     text: format!("{bot_name}: {token_desc}"),
                                 });
                                 state.animations.push(bot_highlight(bot_id, 150));
-                                // Push ChipChange for all affected players
-                                for (pid, old_chips) in &chips_before {
-                                    let new_chips = new_state
-                                        .players
-                                        .iter()
-                                        .find(|p| p.id == *pid)
-                                        .map_or(0, |p| p.chips);
-                                    let delta = new_chips as i8 - *old_chips as i8;
-                                    if delta != 0 {
-                                        state.animations.push(Animation::ChipChange {
-                                            player_id: *pid,
-                                            delta,
-                                            duration_ms: 600,
-                                        });
-                                    }
-                                }
                                 state.game = Some(new_state);
                                 continue; // Loop back — bot still needs Draw/Stand
                             }
@@ -1764,24 +1734,6 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 let action = bot.choose_action(&game_state, &mut state.rng);
                 let action_desc = describe_action(&action, &game_state);
 
-                // Extract draw family before consuming the action
-                let draw_family = if let Action::PlayerAction {
-                    action: TurnAction::Draw(ref source),
-                    ..
-                } = &action
-                {
-                    Some(match source {
-                        DrawSource::SandDeck | DrawSource::SandDiscard => {
-                            sabacc_core::card::Family::Sand
-                        }
-                        DrawSource::BloodDeck | DrawSource::BloodDiscard => {
-                            sabacc_core::card::Family::Blood
-                        }
-                    })
-                } else {
-                    None
-                };
-
                 match game::apply_action(game_state, action, &mut state.rng) {
                     Ok(new_state) => {
                         state.game = Some(new_state);
@@ -1791,19 +1743,6 @@ pub fn run_bots(mut state: AppState) -> AppState {
                             text: format!("{bot_name}: {action_desc}"),
                         });
                         state.animations.push(bot_highlight(bot_id, 200));
-                        // Chip/card animations for Draw actions
-                        if let Some(family) = draw_family {
-                            state.animations.push(Animation::ChipChange {
-                                player_id: bot_id,
-                                delta: -1,
-                                duration_ms: 600,
-                            });
-                            state.animations.push(Animation::CardFlash {
-                                player_id: bot_id,
-                                family,
-                                duration_ms: 300,
-                            });
-                        }
                         continue; // Next bot or human
                     }
                     Err(e) => {

@@ -116,7 +116,7 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
             break;
         }
 
-        // Line 2: chips ●○ + optional ChipChange indicator
+        // Line 2: chips ●○
         let filled = "●".repeat(player.chips as usize);
         let invested = "○".repeat(player.pot as usize);
         let chips_color = if player.chips == 0 && !player.is_eliminated {
@@ -124,31 +124,11 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
         } else {
             Color::Rgb(200, 200, 100)
         };
-        let mut chip_spans = vec![
+        let chips_line = Line::from(vec![
             Span::raw("  "),
             Span::styled(&filled, Style::default().fg(chips_color)),
             Span::styled(&invested, Style::default().fg(Color::DarkGray)),
-        ];
-
-        // ChipChange animation indicator
-        if let Some((delta, progress)) = get_chip_change(app, player.id) {
-            let (text, color) = if delta > 0 {
-                (format!(" +{delta}"), Color::Green)
-            } else {
-                (format!(" {delta}"), Color::Red)
-            };
-            let fg = if progress > 0.7 {
-                Color::DarkGray
-            } else {
-                color
-            };
-            chip_spans.push(Span::styled(
-                text,
-                Style::default().fg(fg).add_modifier(Modifier::BOLD),
-            ));
-        }
-
-        let chips_line = Line::from(chip_spans);
+        ]);
         buf.set_line(inner.x, y, &chips_line, inner.width);
         y += 1;
 
@@ -175,21 +155,4 @@ fn is_player_highlighted(app: &AppState, player_id: sabacc_core::PlayerId) -> bo
         }
     }
     false
-}
-
-/// Returns (delta, progress) if a ChipChange animation is active for this player.
-fn get_chip_change(app: &AppState, player_id: sabacc_core::PlayerId) -> Option<(i8, f64)> {
-    if let Some(ref active) = app.animations.current {
-        if let Animation::ChipChange {
-            player_id: pid,
-            delta,
-            ..
-        } = &active.animation
-        {
-            if *pid == player_id {
-                return Some((*delta, active.progress()));
-            }
-        }
-    }
-    None
 }

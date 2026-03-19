@@ -6,7 +6,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 use super::card::{CardWidget, SAND_COLOR};
-use crate::animation::Animation;
 use crate::app::AppState;
 
 /// Renders the human player's hand with border, split into 3 columns.
@@ -112,17 +111,6 @@ fn render_cards(area: Rect, buf: &mut Buffer, app: &AppState) {
             sand_widget.resolved_impostor = choice.sand_choice;
             blood_widget.resolved_impostor = choice.blood_choice;
         }
-
-        // CardFlash animation: highlight the drawn card
-        if let Some((flash_family, progress)) = get_card_flash(app, 0) {
-            if progress < 0.5 {
-                match flash_family {
-                    sabacc_core::card::Family::Sand => sand_widget.highlighted = true,
-                    sabacc_core::card::Family::Blood => blood_widget.highlighted = true,
-                }
-            }
-        }
-
         sand_widget.render(cols[0], buf);
         blood_widget.render(cols[2], buf);
     }
@@ -237,24 +225,4 @@ fn token_description(token: &sabacc_core::shift_token::ShiftToken) -> String {
         ShiftToken::DirectTransaction(_) => "Swap hand w/ target".into(),
         ShiftToken::PrimeSabacc => "Dice → best Sabacc".into(),
     }
-}
-
-/// Returns (family, progress) if a CardFlash animation is active for the given player.
-fn get_card_flash(
-    app: &AppState,
-    player_id: sabacc_core::PlayerId,
-) -> Option<(sabacc_core::card::Family, f64)> {
-    if let Some(ref active) = app.animations.current {
-        if let Animation::CardFlash {
-            player_id: pid,
-            family,
-            ..
-        } = &active.animation
-        {
-            if *pid == player_id {
-                return Some((*family, active.progress()));
-            }
-        }
-    }
-    None
 }

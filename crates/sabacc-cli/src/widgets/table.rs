@@ -5,7 +5,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 use super::card::{CardWidget, BLOOD_COLOR, SAND_COLOR};
-use crate::animation::Animation;
 use crate::app::AppState;
 
 /// Renders the table with 4 cards in a horizontal line, centered, with border.
@@ -130,33 +129,6 @@ pub fn render(area: Rect, buf: &mut Buffer, app: &AppState) {
             Style::default().fg(BLOOD_COLOR)
         };
         buf.set_string(card_cols[6].x, label_y, "Dis Blood", dis_blood_style);
-    }
-
-    // PhaseAnnounce overlay on top of table content
-    render_phase_announce(inner, buf, app);
-}
-
-/// Renders a PhaseAnnounce text centered on top of the table area.
-fn render_phase_announce(area: Rect, buf: &mut Buffer, app: &AppState) {
-    if let Some(ref active) = app.animations.current {
-        if let Animation::PhaseAnnounce { ref text, .. } = active.animation {
-            let progress = active.progress();
-            let fg = if progress <= 0.5 {
-                Color::White
-            } else {
-                Color::DarkGray
-            };
-            let display = text.to_uppercase();
-            let text_width = display.chars().count() as u16;
-            let x = area.x + area.width.saturating_sub(text_width) / 2;
-            let y = area.y + area.height / 2;
-            buf.set_string(
-                x,
-                y,
-                &display,
-                Style::default().fg(fg).add_modifier(Modifier::BOLD),
-            );
-        }
     }
 }
 

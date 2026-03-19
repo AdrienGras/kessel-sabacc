@@ -104,63 +104,47 @@ non-négociables :
 ### Cartes
 
 ```rust
-// Deux familles, une carte appartient à exactement une famille
-pub enum Family {
-    Sand,
-    Blood,
-}
+pub enum Family { Sand, Blood }
 
-// Valeur d'une carte
 pub enum CardValue {
     Number(u8),   // 1 à 6
     Sylop,        // prend la valeur de l'autre carte en main
     Impostor,     // valeur déterminée par lancer de dés à la révélation
 }
 
-pub struct Card {
-    pub family: Family,
-    pub value: CardValue,
-}
+pub struct Card { pub family: Family, pub value: CardValue }
 ```
 
-Le deck contient :
-- 3 cartes par valeur (1-6) par famille → 36 cartes numérotées
-- 2 Sylops par famille → 4 Sylops
-- 2 Imposteurs par famille → 4 Imposteurs
-- **Total : 44 cartes** réparties en 2 paquets (Sand et Blood)
+Le deck contient 44 cartes (2 paquets Sand/Blood) :
+- 3 cartes × 6 valeurs × 2 familles = 36 numérotées
+- 2 Sylops × 2 familles = 4 Sylops
+- 2 Imposteurs × 2 familles = 4 Imposteurs
 
 ### Main du joueur
 
-Un joueur tient exactement **2 cartes** : une Sand, une Blood.
+Exactement **2 cartes** : une Sand, une Blood.
 
 ```rust
-pub struct Hand {
-    pub sand: Card,
-    pub blood: Card,
-}
+pub struct Hand { pub sand: Card, pub blood: Card }
 ```
 
 ### Hiérarchie des mains (du plus fort au plus faible)
 
-1. **Pure Sabacc** — deux Sylops (une paire Sand Sylop + Blood Sylop)
-2. **Sylop Sabacc** — un Sylop + n'importe quelle carte numérotée (valeur = 0)
-3. **Sabacc** — paire de cartes de même valeur numérique (différence = 0)
-   - Départage : la valeur la plus basse l'emporte (1/1 > 6/6)
-4. **Main non-Sabacc** — différence absolue entre les deux valeurs
-   - Plus la différence est proche de 0, mieux c'est
-   - Ex : Sand 6 + Blood 2 → différence = 4
+1. **Pure Sabacc** — deux Sylops
+2. **Prime Sabacc** — via ShiftToken PrimeSabacc (entre Pure et Sylop)
+3. **Sylop Sabacc** — un Sylop + numérotée (valeur = 0)
+4. **Sabacc** — paire de même valeur (départage : plus basse gagne)
+5. **Non-Sabacc** — différence absolue (plus proche de 0, mieux c'est)
 
 ```rust
 pub enum HandRank {
     PureSabacc,
+    PrimeSabacc { value: u8 },
     SylopSabacc { value: u8 },
     Sabacc { pair_value: u8 },
     NonSabacc { difference: u8 },
 }
 ```
-
-La résolution d'une `Hand` avec des Imposteurs nécessite la valeur de dés en
-paramètre — la fonction de scoring ne lance pas les dés elle-même.
 
 ### Joueur
 
@@ -168,8 +152,8 @@ paramètre — la fonction de scoring ne lance pas les dés elle-même.
 pub struct Player {
     pub id: PlayerId,
     pub name: String,
-    pub chips: u8,         // jetons restants (réserve)
-    pub pot: u8,           // jetons investis dans la manche courante
+    pub chips: u8,         // réserve
+    pub pot: u8,           // investis dans la manche
     pub hand: Option<Hand>,
     pub shift_tokens: Vec<ShiftToken>,
     pub is_eliminated: bool,
@@ -186,788 +170,102 @@ pub struct GameState {
     pub sand_discard: Vec<Card>,
     pub blood_discard: Vec<Card>,
     pub round: u8,
-    pub turn: u8,          // 1, 2 ou 3 dans la manche
+    pub turn: u8,          // 1, 2 ou 3
     pub current_player_idx: usize,
     pub phase: GamePhase,
     pub credits_in_pot: u32,
-}
-
-pub enum GamePhase {
-    Setup,
-    TurnAction,            // le joueur peut jouer un ShiftToken, puis Draw ou Stand
-    ImpostorReveal,        // un ou plusieurs joueurs ont un Imposteur → lancer de dés
-    Reveal,                // tous montrent leur main
-    Penalty,               // calcul et application des pénalités
-    RoundEnd,
-    GameOver { winner: PlayerId },
 }
 ```
 
 ---
 
-## Règles du jeu (référence complète)
+## Règles du jeu
 
 ### Mise en place
 
-1. Chaque joueur paie le buy-in (50–200 crédits selon la table)
-2. Les crédits vont dans le pot
-3. Chaque joueur reçoit 4 à 8 jetons selon la mise (4 pour 50 crédits, 8 pour 200)
-4. Le dealer distribue 2 cartes à chaque joueur (une Sand, une Blood)
-5. 1 carte Sand et 1 carte Blood sont retournées face visible → défausses initiales
+1. Buy-in (50–200 crédits) → pot
+2. 4 à 8 jetons selon la mise
+3. 2 cartes par joueur (1 Sand + 1 Blood)
+4. 1 carte Sand + 1 Blood en défausse face visible
 
-### Tour (Turn)
+### Tour (3 tours par manche)
 
-Chaque manche se compose de **3 tours**. À son tour, un joueur :
-
-1. **Optionnel** : jouer un ShiftToken (avant toute autre action)
-2. **Obligatoire** : choisir Draw ou Stand
-
-**Draw** : piocher une carte depuis l'un des 4 emplacements possibles :
-- Paquet Sand face cachée
-- Paquet Blood face cachée
-- Défausse Sand face visible (carte du dessus)
-- Défausse Blood face visible (carte du dessus)
-
-Après avoir pioché, le joueur défausse soit la carte piochée, soit la carte
-correspondante déjà en main (il conserve toujours exactement 1 Sand + 1 Blood).
-**Coût : 1 jeton**.
-
-**Stand** : ne rien faire. Gratuit, mais certains ShiftTokens pénalisent les
-joueurs en Stand.
+1. **Optionnel** : jouer un ShiftToken
+2. **Obligatoire** : Draw (piocher depuis 4 sources, coût 1 jeton, défausser
+   piochée ou en main) ou Stand (gratuit)
 
 ### Révélation
 
-Après le 3e tour, tous les joueurs révèlent leur main dans le sens horaire depuis
-le dealer.
+Après le 3e tour. Imposteur → lancer 2 dés, choisir une valeur.
 
-Si une main contient un **Imposteur** : le joueur lance les 2 dés Sabacc et
-choisit l'une des deux valeurs obtenues pour remplacer l'Imposteur (entre 1 et 6).
-Répéter pour chaque Imposteur en main.
+### Pénalités
 
-### Résultat et pénalités
-
-Le gagnant de la manche récupère l'intégralité de ses jetons investis ce tour.
-
-Les perdants sont taxés :
-- **Main Sabacc perdante** → perd **1 jeton**
-- **Main non-Sabacc** → perd un nombre de jetons égal à la **différence** de ses
-  deux cartes
-
-Les jetons taxés sont détruits (retirés du jeu, pas redistribués).
-
-**Égalité** : tous les joueurs à égalité récupèrent leurs jetons. Les pénalités
-s'appliquent normalement aux autres.
-
-Un joueur est **éliminé** quand il n'a plus aucun jeton.
-
-### Fin de partie
-
-Le dernier joueur encore en possession de jetons remporte la partie et les crédits
-du pot.
+- Gagnant récupère ses jetons investis
+- Perdant Sabacc → perd 1 jeton
+- Perdant non-Sabacc → perd la différence en jetons
+- Égalité → tous à égalité récupèrent leurs jetons
+- 0 jetons → éliminé. Dernier debout gagne le pot.
 
 ---
 
 ## Les 16 ShiftTokens
 
-Chaque ShiftToken ne peut être utilisé **qu'une seule fois par partie** (pas par
-manche), avant une action Draw ou Stand.
+Usage unique par partie, avant Draw/Stand.
 
 ```rust
 pub enum ShiftToken {
-    FreeDraw,           // piocher sans payer 1 jeton ce tour
-    Refund,             // récupérer 2 jetons investis ce tour (min 1 investi)
-    ExtraRefund,        // récupérer 3 jetons investis ce tour
-    GeneralTariff,      // tous les autres joueurs paient 1 jeton
-    TargetTariff(PlayerId), // un joueur ciblé paie 2 jetons
-    Embargo,            // le joueur suivant doit obligatoirement Stand
-    Markdown,           // valeur Sylop = 0 jusqu'à la révélation (Sylop ne matche plus)
-    Immunity,           // immunité contre les effets de ShiftTokens adverses jusqu'à révélation
-    GeneralAudit,       // tous les joueurs en Stand paient 2 jetons
-    TargetAudit(PlayerId), // un joueur ciblé en Stand paie 3 jetons
-    MajorFraud,         // valeur Imposteur fixée à 6 jusqu'à la révélation
-    Embezzlement,       // prendre 1 jeton à chaque autre joueur
-    CookTheBooks,       // inverse le classement Sabacc jusqu'à révélation (6/6 devient le meilleur)
-    Exhaustion(PlayerId), // le joueur ciblé défausse et repioche une nouvelle main complète
-    DirectTransaction(PlayerId), // échanger sa main avec un joueur ciblé
-    PrimeSabacc,        // lancer 2 dés, la valeur choisie devient le meilleur Sabacc
+    FreeDraw,                       // piocher sans payer
+    Refund,                         // récupérer 2 jetons investis
+    ExtraRefund,                    // récupérer 3 jetons investis
+    GeneralTariff,                  // tous paient 1 jeton
+    TargetTariff(PlayerId),         // ciblé paie 2 jetons
+    Embargo,                        // suivant doit Stand
+    Markdown,                       // Sylop = 0 (ne matche plus)
+    Immunity,                       // immunité ShiftTokens adverses
+    GeneralAudit,                   // Stand = paient 2 jetons
+    TargetAudit(PlayerId),          // ciblé en Stand paie 3 jetons
+    MajorFraud,                     // Imposteur fixé à 6
+    Embezzlement,                   // prendre 1 jeton à chacun
+    CookTheBooks,                   // inverse le classement
+    Exhaustion(PlayerId),           // ciblé repioche une nouvelle main
+    DirectTransaction(PlayerId),    // échanger sa main
+    PrimeSabacc,                    // lancer 2 dés → meilleur Sabacc
 }
 ```
-
----
-
-## Frontend TUI (sabacc-cli / Ratatui)
-
-> **Consulter Context7 pour `ratatui` et `crossterm` avant d'implémenter.**
-
-### Architecture
-
-Modèle événementiel classique Ratatui :
-
-```
-loop {
-    terminal.draw(|frame| ui::render(frame, &app))?;
-    let event = events::next()?;
-    app = app.update(event);
-    if app.should_quit { break; }
-}
-```
-
-`app.rs` contient `AppState` qui encapsule `GameState` + état TUI (curseur,
-dialogue actif, animation en cours). `app.update()` est une fonction pure :
-`AppState → Event → AppState`.
-
-### Layout V2 — 3 colonnes (min 120×30)
-
-```
-┌─ Header ─────────────────────────────────────────────────────────────────────────────────┐
-├──────────────────┬────────────────────────────────────────────────────┬───────────────────┤
-│ JOUEURS (22ch)   │ TABLE DE JEU (flexible, min 60ch)                 │ LOG (27ch)        │
-│                  │   Déf Sand  Deck Sand  Deck Blood  Déf Blood      │ (scrollable)      │
-│ ▶ Vous           │   [card]    [card]     [card]      [card]          │                   │
-│   ●●●●●○○        │                                                    │                   │
-│   5 rés. + 2 pot │ ACTIONS                                           │                   │
-│                  │   [Draw] [Stand] [Token (s)]                      │                   │
-│   Lando          │                                                    │                   │
-│   ●●●○○          │ VOTRE MAIN                                        │                   │
-│   3 rés. + 2 pot │   ●●●●●○○    [Sand][Blood]    SHIFT TOKENS       │                   │
-│                  │   5r+2p       [card][card]      FreeDraw           │                   │
-│                  │                                  — Piocher gratuit │                   │
-├──────────────────┴────────────────────────────────────────────────────┴───────────────────┤
-```
-
-- Col 1 (JOUEURS) : 3 lignes/joueur (nom, ●○, détail), éliminés compactés si nécessaire
-- Col 2 (JEU) : 3 blocs bordés — Tapis (expand, cartes centrées), Actions (fixe), Main (fixe bas, 3 sous-colonnes 1/3 : jetons | cartes | tokens)
-- Col 3 (LOG) : scrollable PageUp/PageDown, troncature `…`, auto-scroll
-- Pas de mode compact — message d'erreur si terminal < 120×30
-- Overlays rendus sur `frame.area()` entier, centrés
-
-Les cartes sont rendues en blocs ASCII 8×5 avec bordures Unicode et couleurs :
-- Sand → `Color::Rgb(232, 192, 80)` (ambre chaud)
-- Blood → `Color::Rgb(232, 72, 72)` (rouge sang)
-- Sylop → `Color::Rgb(144, 144, 224)` (violet)
-- Imposteur → `Color::DarkGray`
-
-### Interactions clavier
-
-| Touche      | Action                           |
-| ----------- | -------------------------------- |
-| `Tab`       | Naviguer entre les actions       |
-| `Enter`     | Confirmer l'action sélectionnée  |
-| `1`–`4`     | Sélectionner la source de pioche |
-| `s`         | Jouer un ShiftToken              |
-| `PageUp/Dn` | Scroller le log                 |
-| `Space`     | Skip les animations              |
-| `q`         | Quitter (avec confirmation)      |
-| `?`         | Aide / règles                    |
-
----
-
-## Frontend Web (web/ · Svelte + Vite + WASM)
-
-> **Consulter Context7 pour `svelte` et `vite` avant d'implémenter.**
-
-### Intégration WASM
-
-`sabacc-wasm` expose via `wasm-bindgen` des fonctions qui prennent et retournent
-du JSON sérialisé (via `serde_json`) — pas de types complexes partagés.
-
-```rust
-// sabacc-wasm/src/lib.rs — exemple de surface exposée
-#[wasm_bindgen]
-pub fn new_game(config_json: &str) -> String { ... }
-
-#[wasm_bindgen]
-pub fn draw_card(state_json: &str, player_id: u8, source: &str) -> String { ... }
-
-#[wasm_bindgen]
-pub fn stand(state_json: &str, player_id: u8) -> String { ... }
-
-#[wasm_bindgen]
-pub fn reveal(state_json: &str, impostor_values: &str) -> String { ... }
-
-#[wasm_bindgen]
-pub fn play_shift_token(state_json: &str, token: &str, target: Option<u8>) -> String { ... }
-```
-
-Chaque fonction retourne un `Result<GameState, GameError>` sérialisé en JSON.
-Le frontend n'effectue aucun calcul de règle — il appelle le WASM et met à jour
-les stores.
-
-### Stores Svelte
-
-```javascript
-// src/lib/stores.js
-export const gameState = writable(null);   // GameState désérialisé
-export const localPlayer = writable(null); // joueur local (index)
-export const ui = writable({
-    selectedSource: null,  // source de pioche sélectionnée
-    selectedToken: null,   // ShiftToken sélectionné
-    phase: 'idle',         // 'idle' | 'draw' | 'token' | 'reveal' | 'dice'
-    diceResult: null,
-});
-```
-
-### Composant Card.svelte
-
-Composant SVG paramétrique — aucun asset externe.
-
-```
-Props:
-  family: "sand" | "blood" | "sylop" | "impostor"
-  value: 1 | 2 | 3 | 4 | 5 | 6 | null   (null = face cachée)
-  faceDown: boolean
-  selected: boolean
-  onClick: () => void
-
-Palette:
-  Sand   → fond #1A1208, accent #E8C050, symbole triangle
-  Blood  → fond #180808, accent #E84848, symbole losange
-  Sylop  → fond #0C0C18, accent #9090E0, symbole double-cercle
-  Imposteur → fond #0F0E0D, accent #707070, symbole "?"
-```
-
----
-
-## Ordre de développement recommandé
-
-### Phase 1 — Core (sabacc-core)
-
-1. Consulter Context7 sur les crates utilitaires Rust pertinents
-2. Implémenter les types de données (`card.rs`, `hand.rs`, `player.rs`)
-3. Implémenter la logique de deck et le mélange (`deck.rs`)
-4. Implémenter le scoring et la hiérarchie des mains (`scoring.rs`)
-5. Implémenter la machine à états du jeu (`game.rs`, `round.rs`, `turn.rs`)
-6. Implémenter les ShiftTokens (`shift_token.rs`)
-7. Tests unitaires exhaustifs — couvrir les cas limites :
-   - Égalité entre deux mains identiques
-   - Imposteur avec valeur de dés donnée en paramètre
-   - Sylop avec Markdown actif
-   - CookTheBooks inversant le classement
-   - Joueur éliminé en cours de manche
-
-### Phase 2 — TUI (sabacc-cli)
-
-1. Consulter Context7 pour `ratatui` (layout, widgets, event loop)
-2. Consulter Context7 pour `crossterm` (raw mode, events)
-3. Mettre en place la boucle événementielle (`main.rs`, `events.rs`)
-4. Implémenter le layout principal (`ui.rs`)
-5. Implémenter le rendu des cartes ASCII (`ui.rs`)
-6. Connecter les interactions clavier aux actions du core
-
-### Phase 3 — WASM + Web
-
-1. Consulter Context7 pour `wasm-bindgen` et la sérialisation JSON
-2. Implémenter `sabacc-wasm` avec `wasm-pack` comme outil de build
-3. Consulter Context7 pour `vite` (plugin wasm)
-4. Mettre en place le projet Svelte et l'import du module WASM
-5. Implémenter les stores et `wasm.js`
-6. Implémenter `Card.svelte` (SVG paramétrique)
-7. Implémenter les autres composants et le flux de jeu complet
 
 ---
 
 ## Conventions de code
 
 - Rust edition 2021
-- `clippy` sans warnings — utiliser `#[allow(...)]` uniquement si justifié en commentaire
-- Pas de `unwrap()` ni `expect()` dans le code de production — propager les erreurs
-- Tout type public doit avoir un doc-comment `///`
+- `clippy` sans warnings — `#[allow(...)]` uniquement si justifié
+- Pas de `unwrap()` ni `expect()` en production — propager les erreurs
+- Tout type public : doc-comment `///`
 - Nommage : snake_case Rust, camelCase JS/Svelte, PascalCase composants Svelte
-- Commits en anglais, conventionnel : `feat:`, `fix:`, `test:`, `refactor:`
+- Commits en anglais, gitmoji + conventionnel : `✨ feat:`, `🐛 fix:`, etc.
 
 ---
 
 ## Ce que Claude ne doit PAS faire
 
-- Supposer la syntaxe d'une API Ratatui, wasm-bindgen ou Svelte sans avoir
-  consulté Context7 au préalable
+- Supposer la syntaxe d'une API sans consulter Context7
 - Placer de la logique de règle dans `sabacc-cli` ou `sabacc-wasm`
 - Utiliser `unwrap()` en dehors des tests
-- Générer des assets graphiques — les visuels sont 100% SVG/code
-- Modifier les règles du jeu telles que définies dans ce fichier sans demande
-  explicite
+- Générer des assets graphiques — visuels 100% SVG/code
+- Modifier les règles du jeu sans demande explicite
 
 ---
 
-## Décisions d'implémentation (Phase 1)
-
-### Design patterns retenus
-
-| Sujet | Décision | Raison |
-|-------|----------|--------|
-| RNG | `rand` 0.8 + `&mut impl Rng` en paramètre | Tests déterministes avec `SmallRng::seed_from_u64` |
-| Machine à états | `GamePhase` enum + `apply_action(state, action, rng) -> Result` | Fonctions pures, pas de mutation cachée |
-| Draw flow | 2 étapes : `Draw(source)` → `ChoosingDiscard` → `ChooseDiscard` | Permet au frontend de montrer la carte piochée avant le choix |
-| HandRank | `strength_key() -> (u8, u8)` explicite, pas de `derive(Ord)` | Contrôle fin du classement, support des modifiers (CookTheBooks) |
-| Bot | Trait `BotStrategy` + `BasicBot` | Extensible pour des stratégies plus avancées |
-| Versions | `version.workspace = true` dans les sub-crates | Centralise le versioning dans le Cargo.toml racine |
-| Modifiers Phase 2 | `ActiveModifiers` struct passée à `evaluate_hand` et `compare_ranks` | Hooks pour ShiftTokens sans changer l'API |
-
-### Fichiers ajoutés à Phase 1 (non dans le plan original)
-
-- `bot.rs` — IA basique incluse dans le core (pas un crate séparé)
-- `tests/full_game.rs` — tests d'intégration avec seed fixe
-
-### GamePhase final (diffère légèrement de la spec initiale)
-
-```rust
-pub enum GamePhase {
-    Setup,
-    TurnAction,
-    ChoosingDiscard { player_id, drawn_card },  // état intermédiaire après pioche
-    ImpostorReveal { pending, submitted },        // avec tracking des choix soumis
-    Reveal { results },
-    PrimeSabaccChoice { player_id, die1, die2 }, // Phase 2 — choix de dé PrimeSabacc
-    RoundEnd,
-    GameOver { winner },
-}
-```
-
-Note : `Penalty` a été fusionné dans `Reveal` → `AdvanceRound` → `RoundEnd`.
-
----
-
-## Décisions d'implémentation (Phase 2 — ShiftTokens)
-
-### Nouvelles phases et actions
-
-```rust
-// Nouveau variant GamePhase
-PrimeSabaccChoice { player_id, die1, die2 }
-
-// Nouvelle action
-SubmitPrimeSabaccChoice { player_id, chosen_value }
-```
-
-### Nouveau HandRank
-
-`PrimeSabacc { value }` inséré entre PureSabacc (0,0) et SylopSabacc (1,x) avec
-strength_key `(0, 1)`.
-
-### ActiveModifiers étendu
-
-```rust
-pub struct ActiveModifiers {
-    pub markdown_active: bool,
-    pub cook_the_books_active: bool,
-    pub major_fraud_active: bool,           // NEW
-    pub immune_players: Vec<PlayerId>,      // NEW
-    pub prime_sabacc: Option<PrimeSabaccModifier>, // NEW
-}
-```
-
-### État par tour sur GameState
-
-```rust
-pub stood_this_turn: Vec<PlayerId>,
-pub embargoed_player: Option<PlayerId>,
-pub token_played_this_turn: bool,
-pub free_draw_active: bool,
-pub pending_audit: PendingAudit,
-```
-
-Ces champs sont reset à chaque nouveau tour (dans `advance_turn`) et nouvelle
-manche (dans `apply_advance_round`).
-
-### TokenDistribution
-
-```rust
-pub enum TokenDistribution {
-    Random { tokens_per_player: usize },
-    Fixed(Vec<ShiftToken>),
-    None,  // Phase 1 compat
-}
-```
-
-### Bot IA tokens
-
-Le trait `BotStrategy` a été étendu avec :
-- `choose_token()` → ~30% chance par tour, heuristique par type de token
-- `choose_prime_sabacc()` → valeur de dé la plus proche des cartes en main
-- Targeting stratégique via `most_threatening()` (joueur avec le plus de chips)
-
-### Audit resolution
-
-Les audits sont résolus en fin de **tour** (quand tous les joueurs ont agi),
-pas en fin de manche. Le source du GeneralAudit est exclu de son propre effet.
-
-### Fichiers ajoutés à Phase 2
-
-- `tests/shift_token_tests.rs` — 32 tests unitaires et d'intégration
-
----
-
-## Décisions d'implémentation (Phase 3 — TUI sabacc-cli)
-
-### Architecture TUI (Elm / TEA)
-
-| Sujet | Décision | Raison |
-|-------|----------|--------|
-| Pattern | `update(state, event) → (state, Command)` pur | Testable, pas de side-effects dans la logique |
-| Side-effects | `Command::RunBots` déclenché par le main loop | Sépare les effets (bots) de la logique pure |
-| Bots | Boucle manuelle 1 bot à la fois (pas `advance_bots`) | Permet de logger chaque bot individuellement |
-| Overlays | Rendus sur `frame.area()` entier, pas dans un sous-pane | Évite le clipping dans les petites zones |
-| Log scroll | `log_scroll_offset` (offset depuis le bas), PageUp/PageDown | Convention "offset from bottom" avec auto-scroll |
-| Min terminal | 120×30, message d'erreur si trop petit | Pas de mode compact — simplifie le code |
-
-### Layout V2 — Contraintes Ratatui
-
-```rust
-// 3 colonnes
-Layout::horizontal([Length(22), Min(60), Length(27)])
-// Centre : tapis (expand) + actions (fixe) + main (fixe bas)
-Layout::vertical([Min(9), Length(5), Length(10)])
-// Main : 3 sous-colonnes égales
-Layout::horizontal([Ratio(1,3), Ratio(1,3), Ratio(1,3)])
-```
-
-### Structure des fichiers sabacc-cli
-
-```
-crates/sabacc-cli/src/
-├── main.rs          # terminal setup, panic hook, clap args, main loop
-├── app.rs           # AppState, TuiState, update(), Command, run_bots()
-├── animation.rs     # Animation queue, tick, skip
-├── events.rs        # crossterm → AppEvent (Key/Tick/Resize)
-├── ui.rs            # render() dispatch, menu/setup/playing/help screens
-└── widgets/
-    ├── mod.rs
-    ├── card.rs      # CardWidget ASCII 8×5 + inline [S△3]
-    ├── header.rs    # Titre + manche/tour/phase
-    ├── players.rs   # 3 lignes/joueur, compact éliminés, +N... troncature
-    ├── table.rs     # 4 cartes horizontales centrées + labels
-    ├── actions.rs   # ActionBar bordée + 7 overlays (source, discard, token, target, dés, quit, gameover)
-    ├── hand.rs      # 3 colonnes 1/3 : jetons ●○ | cartes centrées | tokens liste
-    ├── log.rs       # Scroll PageUp/PageDown, word-wrap, préfixe ›, indicateur ▼ new
-    └── starfield.rs # Animated starfield background (shared across menu screens)
-```
-
-### Dépendances
-
-```toml
-sabacc-core = { path = "../sabacc-core" }
-ratatui = { version = "0.29", features = ["crossterm"] }
-crossterm = "0.28"
-rand = { version = "0.8", features = ["small_rng"] }
-clap = { version = "4", features = ["derive"] }
-```
-
-### CLI args (clap)
-
-```
-sabacc-cli                           # main menu (MainMenu screen)
-sabacc-cli --quick                   # 3 bots, 100cr, tokens on (skip menu)
-sabacc-cli --bots 2 --buy-in 50     # skip menu
-sabacc-cli --name "Lando"            # nom custom
-sabacc-cli --no-tokens               # désactive ShiftTokens
-```
-
-### Tests : 8 tests CLI + 97 tests core
-
----
-
-## Lessons learned
-
-### Commitizen + Cargo workspaces
-
-Le provider Cargo de `commitizen` (`version_provider = "cargo"`) ne supporte pas
-bien les workspaces Rust :
-- Il cherche `[package]` dans le `Cargo.toml` racine, pas `[workspace.package]`
-- Le `set_lock_version` crash si le workspace n'a pas de `[package].name`
-- **Workaround** : utiliser `[workspace.package].version` et faire le bump
-  manuellement (modifier le TOML + tag + commit), ou commit gitmoji manuellement
-  puis `git tag`
-
-### Deck total_cards après deal_hands
-
-`deal_hands` pioche 1 carte initiale de défausse puis la replace dans la pile de
-défausse du même deck → `total_cards()` ne change pas pour cette opération.
-Seules les cartes distribuées aux joueurs réduisent le total.
-
-### Clippy et mut
-
-Clippy est strict sur les `mut` inutiles et les imports non utilisés dans les
-modules de test. Toujours vérifier clippy après compilation mais avant commit.
-
-### Overlays doivent être rendus sur frame.area() entier
-
-Les overlays (popups) doivent être rendus sur la zone complète du terminal, pas
-dans un sous-pane comme l'action bar. Sinon ils sont clippés à la taille du pane
-(3 lignes) et invisibles. Bug découvert dès la première session de test.
-
-### advance_bots() joue TOUS les bots d'un coup
-
-La fonction `advance_bots()` du core boucle en interne jusqu'au tour d'un humain.
-Si on veut logger chaque bot individuellement, il faut boucler manuellement avec
-`BotStrategy::choose_action()` + `apply_action()` un bot à la fois.
-
-### GameState est consommé par apply_action()
-
-`apply_action(state, action, rng)` consomme `state`. Si l'action échoue, l'état
-est perdu. Solution : `.take()` + `.clone()` avant si on veut pouvoir retry,
-ou accepter la perte et logguer l'erreur.
-
-### rand small_rng feature
-
-`SmallRng` nécessite la feature `small_rng` dans `rand = { version = "0.8",
-features = ["small_rng"] }`. Sans elle, l'import compile pas.
-
-### Layout TUI : centrer les éléments dans les panes expansibles
-
-Quand un pane utilise `Min(N)` et prend tout l'espace disponible, les éléments à
-l'intérieur (cartes, texte) doivent être centrés horizontalement et verticalement
-avec des offsets calculés : `offset = (available - content) / 2`.
-
-### Bordures Ratatui : compter +2 pour la hauteur
-
-Quand on utilise `Block::default().borders(Borders::ALL)`, l'inner area perd 2
-lignes (top+bottom) et 2 colonnes. Ajuster les `Constraint::Length()` en
-conséquence.
-
-### Tokens overflow : mode compact adaptatif
-
-Si les shift tokens ne tiennent pas en 2 lignes/token (nom + desc), basculer
-automatiquement en 1 ligne/token (nom — desc sur la même ligne).
-
-### Messages de log concis pour colonne étroite
-
-La colonne log fait ~23 chars utiles. Les messages doivent être abrégés :
-"Draw Deck S" au lieu de "pioche depuis Deck Sand". Le log fait du word-wrap
-avec préfixe `›` pour le premier segment et indentation `  ` pour les suivants.
-
-### ImpostorReveal / PrimeSabaccChoice : ne PAS utiliser is_human_turn()
-
-`is_human_turn()` vérifie `current_player_idx` (le tour de jeu), pas qui a un
-imposteur ni qui doit choisir pour PrimeSabacc. Ces phases ont leur propre logique :
-- `ImpostorReveal` → vérifier si `pending.contains(&human_id)`
-- `PrimeSabaccChoice` → vérifier si `player_id == 0`
-Si la condition est fausse → `Command::RunBots` pour que les bots résolvent.
-Le tick handler doit aussi relancer les bots pour ces phases, pas seulement
-`TurnAction`. Bug de freeze si oublié.
-
-### Tous les overlays doivent supporter ↑↓ en plus de Tab
-
-Les overlays de sélection (dés, sources, tokens) doivent accepter `KeyCode::Up`
-et `KeyCode::Down` en plus de `Tab`/`Left`/`Right`. L'utilisateur s'attend à ce
-que les flèches fonctionnent partout.
-
-### Action bar : afficher un message pour CHAQUE GamePhase
-
-Le `render_bar` doit avoir un cas explicite pour chaque `GamePhase` :
-`TurnAction`, `Reveal`, `RoundEnd`, `GameOver`, `ImpostorReveal`,
-`PrimeSabaccChoice`, `ChoosingDiscard`. Si un variant tombe dans `_ => {}`,
-l'utilisateur voit une action bar vide et pense que le jeu est figé.
-
-### Token descriptions dupliquées : actions.rs (long) et hand.rs (short)
-
-Les descriptions de ShiftTokens existent en **2 copies** :
-- `widgets/actions.rs::token_description()` → version longue pour le popup overlay
-- `widgets/hand.rs::token_description()` → version courte pour la sidebar (colonne étroite)
-
-Lors de toute modification de texte de token, penser à mettre à jour les deux.
-
-### Labels de table : 8 chars max
-
-Les labels sous les cartes de la table ("Dis Sand", "Deck(N)", "Dis Blood") sont
-limités à **8 caractères** par la largeur des colonnes de cartes. Utiliser des
-abréviations : "Dis" (Discard), "Deck" (Draw pile).
-
-### UI language : English
-
-Depuis v0.5.0, toute l'interface du jeu est en anglais. Les messages de log, les
-overlays, les labels, les descriptions de tokens, l'écran de setup et l'aide sont
-en anglais. Maintenir cette cohérence pour tout nouveau texte ajouté.
-
-### is_animating() doit couvrir TOUTES les animations visuelles
-
-`AppState::is_animating()` contrôle si le main loop génère des ticks (33ms) ou
-bloque en attente d'input. Si une animation visuelle (overlay reveal, etc.) n'est
-pas couverte par `is_animating()`, les ticks cessent et l'animation gèle.
-Actuellement couvre : `AnimationQueue` + `RoundResults` reveal + `RoundAnnouncement`
-countdown. Tout nouvel effet animé doit être ajouté à cette vérification.
-
-### Double impostor : overlay en deux étapes
-
-Quand un joueur a Sand+Blood impostors, l'overlay `ImpostorChoice` doit proposer
-deux choix de dés consécutifs (Sand puis Blood) avant de soumettre un seul
-`ImpostorChoice` au core avec `sand_choice` ET `blood_choice` remplis. Le champ
-`has_blood_impostor` sur l'overlay contrôle ce flow en deux étapes.
-
-### RoundResults chips_before : réserve seule, pas réserve+pot
-
-`chips_before` dans `RoundResultDisplay` doit être `p.chips` (réserve seule), pas
-`p.chips + p.pot`. Le pot est "investi et à risque". `chips_after` = réserve + pot
-retourné (winner) ou réserve - pénalité (loser). Cela montre la transition visible
-du pot qui revient dans la réserve du gagnant.
-
-### AdvanceRound est un double-step : Reveal → RoundEnd → TurnAction
-
-`Action::AdvanceRound` depuis `Reveal` ne va pas directement à `TurnAction` —
-il passe par `RoundEnd` d'abord. Il faut un **2ème `AdvanceRound`** pour aller
-de `RoundEnd` → `TurnAction` du round suivant. Tout overlay intermédiaire
-(comme `RoundAnnouncement`) doit appliquer ce 2ème AdvanceRound à son dismiss,
-sinon le joueur reste bloqué en `RoundEnd` avec "[Enter] Next round".
-
-**GameOver bypass** : après le 1er AdvanceRound (Reveal→RoundEnd), vérifier si
-≤1 joueur reste. Si oui, appliquer immédiatement le 2ème AdvanceRound pour aller
-directement à GameOver, sans afficher RoundAnnouncement. Ne pas compter sur
-`check_phase_transitions` pour détecter GameOver à ce stade — elle ne le voit
-qu'après le 2ème AdvanceRound.
-
-### Overlays auto-dismiss : timer + skip + action post-dismiss
-
-Pour un overlay qui se ferme automatiquement après N ticks :
-1. Ajouter le variant avec `ticks_remaining: u16` (~60 ticks = ~2s à 33ms)
-2. `is_animating()` doit retourner `true` (sinon pas de ticks)
-3. Tick handler : décrémenter, puis appeler une fonction de dismiss partagée
-4. Input handler (Enter/Space) : même fonction de dismiss
-5. La fonction de dismiss doit gérer les transitions de phase post-fermeture
-   (AdvanceRound, RunBots, GameOver check, etc.)
-
-### Progress bar sur overlays auto-dismiss
-
-Utiliser `ticks_remaining` pour calculer une barre de progression visuelle :
-`filled = ((TOTAL - remaining) * bar_width) / TOTAL` (integer math, pas de float).
-Constante `ROUND_ANNOUNCE_TOTAL_TICKS` partagée entre `app.rs` (création) et
-`widgets/actions.rs` (rendu) pour éviter les magic numbers dupliqués.
-Caractères : `▰` (rempli) / `▱` (vide), couleur ambre Sand.
-
-### Log : word-wrap + préfixe `›` pour distinguer les messages
-
-Pour un log dans une colonne étroite, ne pas tronquer — wrapper intelligemment.
-Utiliser un symbole (`›`) en début de chaque nouveau message et indenter les
-lignes de continuation. Le split se fait aux espaces (ou hard-break si un mot
-est trop long). Compter les **chars** pas les **bytes** pour les largeurs
-(UTF-8 multi-bytes comme `é`, `→`, `●`).
-
-### is_animating() vs is_game_animating()
-
-Le starfield a besoin de ticks (~30fps) sur les écrans menu, mais ne doit PAS
-bloquer les inputs clavier. `is_animating()` contrôle la génération de ticks
-(retourne `true` pour MainMenu/Setup/HowToPlay + game animations).
-`is_game_animating()` ne couvre que les animations de jeu (AnimationQueue,
-RoundResults reveal, RoundAnnouncement) et est utilisée pour le blocage d'input.
-Tout nouvel écran non-jeu avec animation doit suivre ce pattern.
-
-### Starfield : initialiser avec la taille réelle du terminal
-
-`Starfield::new()` doit utiliser `crossterm::terminal::size()` et non des
-dimensions hardcodées. Sinon les étoiles ne couvrent pas tout l'écran sur les
-grands terminaux. Le `-2` compense la bordure.
-
-### ASCII art : compter chars() pas len()
-
-Pour centrer du texte contenant des caractères multi-bytes (comme `█`, 3 bytes
-UTF-8 mais 1 colonne de largeur), utiliser `.chars().count()` et non `.len()`
-pour calculer la largeur d'affichage et le positionnement horizontal.
-
-### Layout sticky footer : sortir du layout flex
-
-Pour un élément toujours collé au bas de l'écran (hints), ne pas l'inclure dans
-le layout vertical flexible. Le rendre en position absolue à
-`inner.bottom().saturating_sub(1)` et réduire la zone de contenu d'1 ligne.
-
-### Description markup : {text} pour strikethrough
-
-Les descriptions de menu supportent `{text}` pour le barré via `parse_desc_line()`
-dans ui.rs. Le parser est générique — tout texte entre accolades est rendu avec
-`Modifier::CROSSED_OUT`.
-
-### BorderType::Rounded partout (v0.10.0)
-
-Depuis v0.10.0, **tous** les `Block` de l'application utilisent `BorderType::Rounded`
-(coins `╭╮╰╯`). Cela inclut :
-- La bordure extérieure de l'écran de jeu (ambre, avec titre dynamique Round/Turn/Phase)
-- Les 5 panels intégrés (PLAYERS, GAME TABLE, ACTIONS, YOUR HAND, LOG)
-- Tous les overlays (source picker, discard, tokens, target, impostor, quit, help,
-  round announce, round results, game over)
-- Le chrome des écrans menu (MainMenu, Setup, HowToPlay)
-
-Lors de l'ajout d'un nouveau `Block::default()`, toujours ajouter `.border_type(BorderType::Rounded)`.
-
-### Header intégré dans la bordure de jeu (v0.10.0)
-
-Le header standalone (2 lignes, `header.rs::render()`) a été remplacé par un titre
-dynamique dans la bordure arrondie de l'écran de jeu. `header.rs` ne contient plus
-que `phase_label_styled(phase, is_human) -> (String, Color)` utilisée par `ui.rs`.
-Le footer de la bordure affiche des hints clavier contextuels selon la `GamePhase`.
-
-### Pot affiché dans le panneau PLAYERS (v0.10.0)
-
-Le pot (`credits_in_pot`) est affiché en ambre bold en haut du panneau PLAYERS,
-au-dessus de la liste des joueurs. La zone `inner` est réduite de 2 lignes pour
-compenser (pot + separator).
-
-### Sélection de source inline sur le tapis (v0.11.0)
-
-`Overlay::SourcePicker` a été supprimé. La sélection de source de pioche se fait
-désormais directement sur les cartes du tapis via `TuiState::source_picking: bool`.
-
-- Le mode est activé par `d`/Enter sur Draw, désactivé par Enter (confirme) ou Esc (annule)
-- `update_source_picking()` gère la navigation (←→/Tab/1-4) **avant** le dispatch overlay dans `update_playing()`
-- Le mapping source suit l'ordre visuel gauche→droite : 0=SandDiscard, 1=SandDeck, 2=BloodDeck, 3=BloodDiscard
-- `CardWidget.selected = true` rend la bordure blanche (existait déjà)
-- `render_empty_slot()` prend un paramètre `selected: bool` pour le même effet sur les slots vides
-- L'action bar affiche des hints contextuels (`←→: Select source · Enter: Draw · Esc: Cancel`)
-
----
-
-## Flow de push (référence rapide)
-
-Workflow standard pour une feature :
-
-```bash
-# 1. Créer un worktree isolé
-git worktree add .worktrees/<feature-name> -b feat/<feature-name>
-cd .worktrees/<feature-name>
-
-# 2. Développer + tester
-cargo test -p <crate>
-cargo clippy -p <crate> -- -D warnings
-
-# 3. Commit dans le worktree (format gitmoji)
-git add <fichiers>
-git commit -m "✨ feat: description courte
-
-Description longue si nécessaire.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
-
-# 4. Retour sur main + merge
-cd <project-root>
-git checkout main
-git merge feat/<feature-name>
-
-# 5. Bump version
-# Option A — cz bump (si ça marche avec le workspace)
-cz bump --yes
-
-# Option B — manuel (si cz crashe)
-# Modifier [workspace.package].version dans Cargo.toml racine
-# cargo generate-lockfile
-# git add Cargo.toml Cargo.lock crates/*/Cargo.toml
-# git commit -m "🔖 bump: version X.Y.Z → A.B.C"
-# git tag A.B.C
-
-# 6. Push avec tags
-git push --follow-tags
-
-# 7. Cleanup
-git worktree remove .worktrees/<feature-name>  # --force si fichiers non trackés
-git branch -d feat/<feature-name>
-```
-
-### Convention de commits (gitmoji + conventional)
-
-| Emoji | Type | Usage |
-|-------|------|-------|
-| ✨ | feat | Nouvelle fonctionnalité |
-| 🐛 | fix | Correction de bug |
-| ♻️ | refactor | Refactoring sans changement fonctionnel |
-| ✅ | test | Ajout/modification de tests |
-| 🔧 | chore | Configuration, tooling |
-| 🔖 | bump | Changement de version |
-| 🎉 | init | Commit initial |
+## Détails externalisés (mémoires)
+
+Les specs détaillées, décisions d'implémentation et lessons learned sont dans
+les fichiers mémoire `ref_*`. Consulter selon le besoin :
+
+- **TUI spec** → `ref_tui_spec.md` (layout, keys, colors, file structure)
+- **Web spec** → `ref_web_spec.md` (WASM API, Svelte stores, Card.svelte)
+- **Décisions core** → `ref_impl_decisions.md` (design patterns, GamePhase, modifiers)
+- **Lessons learned** → `ref_lessons_learned.md` (gotchas, rendering, animations)
+- **Push flow** → `ref_push_flow.md` (worktree workflow, commit conventions)
 
 <!-- rtk-instructions v2 -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
@@ -1011,7 +309,7 @@ rtk test <cmd>          # Generic test wrapper - failures only
 rtk git status          # Compact status
 rtk git log             # Compact log (works with all git flags)
 rtk git diff            # Compact diff (80%)
-rtk git show            # Compact show (80%)
+rtk git git show            # Compact show (80%)
 rtk git add             # Ultra-compact confirmations (59%)
 rtk git commit          # Ultra-compact confirmations (59%)
 rtk git push            # Ultra-compact confirmations
