@@ -506,7 +506,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sabacc-cli"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "sabacc-core"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "rand",
  "thiserror",
@@ -790,18 +790,18 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "bd39c326cd6bc61b074fb82a7d84c198b12e285d3bd823c06288df4260e5c9c6"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "8fa105d53b3e76c0f85fbd785aa2d997206182d70379f7a89d453b4c27f70778"
 dependencies = [
  "proc-macro2",
  "quote",
