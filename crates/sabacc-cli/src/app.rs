@@ -1746,7 +1746,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                                         state.animations.push(Animation::ChipChange {
                                             player_id: *pid,
                                             delta,
-                                            duration_ms: 400,
+                                            duration_ms: 600,
                                         });
                                     }
                                 }
@@ -1796,7 +1796,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                             state.animations.push(Animation::ChipChange {
                                 player_id: bot_id,
                                 delta: -1,
-                                duration_ms: 400,
+                                duration_ms: 600,
                             });
                             state.animations.push(Animation::CardFlash {
                                 player_id: bot_id,
