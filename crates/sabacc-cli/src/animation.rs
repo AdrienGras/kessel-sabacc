@@ -35,6 +35,7 @@ pub enum Animation {
     #[allow(dead_code)]
     Pause { duration_ms: u64 },
     /// Show a phase transition text on the table.
+    #[allow(dead_code)]
     PhaseAnnounce { text: String, duration_ms: u64 },
 }
 

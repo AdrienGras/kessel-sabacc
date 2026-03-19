@@ -1311,35 +1311,6 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     }
                 }
                 KeyCode::Enter if revealed >= total => {
-                    // Push chip movement animations based on results
-                    if let Some(Overlay::RoundResults { ref results, .. }) = state.tui.overlay {
-                        for result in results {
-                            let pid = state
-                                .game
-                                .as_ref()
-                                .and_then(|g| {
-                                    g.players
-                                        .iter()
-                                        .find(|p| p.name == result.player_name)
-                                        .map(|p| p.id)
-                                })
-                                .unwrap_or(0);
-                            if result.is_winner && result.invested > 0 {
-                                state.animations.push(Animation::ChipChange {
-                                    player_id: pid,
-                                    delta: result.invested as i8,
-                                    duration_ms: 400,
-                                });
-                            } else if !result.is_winner && result.penalty > 0 {
-                                state.animations.push(Animation::ChipChange {
-                                    player_id: pid,
-                                    delta: -(result.penalty as i8),
-                                    duration_ms: 400,
-                                });
-                            }
-                        }
-                    }
-
                     // Close overlay and advance round (Reveal → RoundEnd)
                     state.tui.overlay = None;
                     state = apply_game_action(state, Action::AdvanceRound);
@@ -1499,13 +1470,6 @@ fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
     // Clear impostor choices from previous round
     state.impostor_choices.clear();
 
-    // Push a PhaseAnnounce animation before advancing
-    let round_num = state.game.as_ref().map_or(1, |g| g.round);
-    state.animations.push(Animation::PhaseAnnounce {
-        text: format!("Round {}", round_num),
-        duration_ms: 500,
-    });
-
     // The game is still in RoundEnd — apply AdvanceRound to start the next round
     if state
         .game
@@ -1518,8 +1482,12 @@ fn dismiss_round_announcement(mut state: AppState) -> (AppState, Command) {
     if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
         return (state, Command::None);
     }
-    // Let the tick handler's !is_animating() check dispatch RunBots after the animation
-    (state, Command::None)
+    // Check if bots need to play
+    if !state.is_human_turn() {
+        (state, Command::RunBots)
+    } else {
+        (state, Command::None)
+    }
 }
 
 /// Builds a summary for the RoundAnnouncement overlay.
@@ -1538,17 +1506,6 @@ fn build_round_summary(state: &AppState) -> (u8, usize, String) {
 }
 
 fn check_phase_transitions(state: &mut AppState, game: &GameState) {
-    // Push PhaseAnnounce for revelation phases
-    if matches!(
-        &game.phase,
-        GamePhase::ImpostorReveal { .. } | GamePhase::Reveal { .. }
-    ) {
-        state.animations.push(Animation::PhaseAnnounce {
-            text: "Revelation".into(),
-            duration_ms: 500,
-        });
-    }
-
     match &game.phase {
         GamePhase::Reveal { results } => {
             // Build RoundResultDisplay for each player
