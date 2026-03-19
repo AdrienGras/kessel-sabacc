@@ -1428,16 +1428,6 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
         DrawSource::BloodDiscard => "Dis B",
     };
 
-    // Capture state before action for animations
-    let was_free_draw = state
-        .game
-        .as_ref()
-        .is_some_and(|g| g.free_draw_active);
-    let drawn_family = match source {
-        DrawSource::SandDeck | DrawSource::SandDiscard => sabacc_core::card::Family::Sand,
-        DrawSource::BloodDeck | DrawSource::BloodDiscard => sabacc_core::card::Family::Blood,
-    };
-
     state.tui.overlay = None;
     state.push_log(format!("You: Draw {source_name}"));
     state = apply_game_action(
@@ -1448,19 +1438,8 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
         },
     );
 
-    // Animations for the draw
-    if !was_free_draw {
-        state.animations.push(Animation::ChipChange {
-            player_id: 0,
-            delta: -1,
-            duration_ms: 400,
-        });
-    }
-    state.animations.push(Animation::CardFlash {
-        player_id: 0,
-        family: drawn_family,
-        duration_ms: 300,
-    });
+    // No animations for human draw — the discard overlay opens immediately
+    // and would cover the animations. Bot draws have animations instead.
 
     // If we're now in ChoosingDiscard, open that overlay
     if let Some(ref g) = state.game {
