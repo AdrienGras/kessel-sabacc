@@ -235,13 +235,17 @@ pub fn render_round_results(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
 
 /// Render the Game Over overlay.
 pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
+    use ratatui::layout::{Constraint, Layout};
+    use ratatui::symbols;
+    use ratatui::widgets::{Axis, Chart, Dataset, GraphType, LegendPosition};
+
     let (standings, stats) = match overlay {
         Overlay::GameOverScreen { standings, stats } => (standings, stats),
         _ => return,
     };
 
-    let content_h = standings.len() as u16 + 8; // title + stats + footer
-    let popup_w = (area.width.saturating_sub(4)).min(72);
+    let content_h = (standings.len() as u16 + 14).max(16);
+    let popup_w = (area.width.saturating_sub(4)).min(90);
     let popup_h = (area.height.saturating_sub(2)).min(content_h + 4);
     let popup = centered_popup(area, popup_w, popup_h);
     Clear.render(popup, buf);
@@ -259,15 +263,21 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
     let inner = block.inner(popup);
     block.render(popup, buf);
 
-    if inner.width < 4 || inner.height < 2 {
+    if inner.width < 10 || inner.height < 6 {
         return;
     }
 
-    let mut y = inner.y;
+    // Split into left (standings+stats) and right (chart)
+    let [left_col, right_col] =
+        Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+            .areas(inner);
+
+    // === LEFT COLUMN: Standings + Human Stats ===
+    let mut y = left_col.y;
 
     // Section: FINAL STANDINGS
     buf.set_string(
-        inner.x,
+        left_col.x,
         y,
         "FINAL STANDINGS",
         Style::default()
@@ -276,14 +286,12 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
     );
     y += 1;
 
-    // Separator
-    let sep: String = "─".repeat(inner.width as usize);
-    buf.set_string(inner.x, y, &sep, Style::default().fg(Color::DarkGray));
+    let sep: String = "─".repeat(left_col.width as usize);
+    buf.set_string(left_col.x, y, &sep, Style::default().fg(Color::DarkGray));
     y += 1;
 
-    // Standings table
     for entry in standings {
-        if y >= inner.y + inner.height.saturating_sub(4) {
+        if y >= left_col.y + left_col.height.saturating_sub(8) {
             break;
         }
 
@@ -300,6 +308,12 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
             n => format!("{n}th"),
         };
 
+        let status = if let Some(round) = entry.elimination_round {
+            format!("0 (elim. R{})", round)
+        } else {
+            format!("{} chips", entry.final_chips)
+        };
+
         let name_style = if entry.is_human && entry.rank == 1 {
             Style::default()
                 .fg(WINNER_COLOR)
@@ -310,42 +324,164 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
             Style::default().fg(color)
         };
 
-        let line_text = format!(
-            "{marker} {rank_str}  {:<16} {}",
-            entry.player_name, entry.status
-        );
+        let line_text = format!("{marker} {rank_str}  {:<12} {}", entry.player_name, status);
         buf.set_string(
-            inner.x,
+            left_col.x,
             y,
-            truncate(&line_text, inner.width as usize),
+            truncate(&line_text, left_col.width as usize),
             name_style,
         );
         y += 1;
     }
 
-    // Stats section
+    // YOUR STATS section
     y += 1;
-    if y < inner.y + inner.height.saturating_sub(2) {
+    if y < left_col.y + left_col.height.saturating_sub(6) {
+        buf.set_string(left_col.x, y, &sep, Style::default().fg(Color::DarkGray));
+        y += 1;
         buf.set_string(
-            inner.x,
+            left_col.x,
             y,
-            &sep,
-            Style::default().fg(Color::DarkGray),
+            "YOUR STATS",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+        y += 1;
+
+        let draws_stands = format!(
+            "Draws: {} | Stands: {}",
+            stats.human_draws, stats.human_stands
+        );
+        buf.set_string(
+            left_col.x,
+            y,
+            truncate(&draws_stands, left_col.width as usize),
+            Style::default().fg(Color::Gray),
+        );
+        y += 1;
+
+        if let Some(ref best) = stats.human_best_hand {
+            let best_line = format!("Best hand: {}", best);
+            buf.set_string(
+                left_col.x,
+                y,
+                truncate(&best_line, left_col.width as usize),
+                Style::default().fg(Color::Gray),
+            );
+            y += 1;
+        }
+
+        if stats.human_tokens_played > 0 {
+            let tokens_line = format!("Tokens played: {}", stats.human_tokens_played);
+            buf.set_string(
+                left_col.x,
+                y,
+                truncate(&tokens_line, left_col.width as usize),
+                Style::default().fg(Color::Gray),
+            );
+            y += 1;
+        }
+
+        let chips_lost = format!(
+            "Lost: {} penalties, {} tariffs",
+            stats.human_chips_lost_penalties, stats.human_chips_lost_tariffs
+        );
+        buf.set_string(
+            left_col.x,
+            y,
+            truncate(&chips_lost, left_col.width as usize),
+            Style::default().fg(Color::Gray),
         );
         y += 1;
     }
 
-    if y < inner.y + inner.height.saturating_sub(1) {
-        let stats_line = format!(
-            "Rounds: {}  |  Pot: {} credits  |  Winner: {}",
-            stats.rounds_played, stats.credits_in_pot, stats.winner_name
+    // Game summary
+    y += 1;
+    if y < left_col.y + left_col.height.saturating_sub(1) {
+        let summary = format!(
+            "Rounds: {} | Pot: {} cr",
+            stats.rounds_played, stats.credits_in_pot
         );
         buf.set_string(
-            inner.x,
+            left_col.x,
             y,
-            truncate(&stats_line, inner.width as usize),
+            truncate(&summary, left_col.width as usize),
             Style::default().fg(Color::DarkGray),
         );
+    }
+
+    // === RIGHT COLUMN: Chart ===
+    if !stats.chip_histories.is_empty() && right_col.width >= 20 && right_col.height >= 8 {
+        let max_round = stats.rounds_played as f64;
+        let max_chips = stats
+            .chip_histories
+            .iter()
+            .flat_map(|h| h.data.iter().map(|(_, y)| *y as u8))
+            .max()
+            .unwrap_or(6) as f64;
+
+        let colors = [
+            Color::Rgb(232, 192, 80), // Sand amber (human or first)
+            Color::Rgb(232, 72, 72),  // Blood red
+            Color::Cyan,
+            Color::Green,
+        ];
+
+        let datasets: Vec<Dataset> = stats
+            .chip_histories
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let color = if h.is_human {
+                    colors[0]
+                } else {
+                    colors.get(i).copied().unwrap_or(Color::Gray)
+                };
+                Dataset::default()
+                    .name(h.player_name.as_str())
+                    .marker(symbols::Marker::Braille)
+                    .style(Style::default().fg(color))
+                    .graph_type(GraphType::Line)
+                    .data(&h.data)
+            })
+            .collect();
+
+        let x_label_max = format!("{}", stats.rounds_played);
+        let y_label_max = format!("{}", max_chips as u8);
+        let x_bounds = [0.0, max_round.max(1.0)];
+        let y_bounds = [0.0, (max_chips + 1.0).max(2.0)];
+
+        let chart = Chart::new(datasets)
+            .block(
+                Block::default()
+                    .title("Chip History")
+                    .title_style(
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            )
+            .x_axis(
+                Axis::default()
+                    .title("Round")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .bounds(x_bounds)
+                    .labels(["0", &x_label_max]),
+            )
+            .y_axis(
+                Axis::default()
+                    .title("Chips")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .bounds(y_bounds)
+                    .labels(["0", &y_label_max]),
+            )
+            .legend_position(Some(LegendPosition::TopLeft));
+
+        chart.render(right_col, buf);
     }
 
     // Footer
