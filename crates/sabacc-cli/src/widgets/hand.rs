@@ -150,8 +150,8 @@ fn render_tokens(area: Rect, buf: &mut Buffer, player: &sabacc_core::player::Pla
             if y >= area.bottom() {
                 break;
             }
-            let name = token_name(token);
-            let desc = token_description(token);
+            let name = token.to_string();
+            let desc = token.description();
 
             let max_w = area.width as usize;
             let text = if name.len() + 3 + desc.len() <= max_w {
@@ -169,60 +169,17 @@ fn render_tokens(area: Rect, buf: &mut Buffer, player: &sabacc_core::player::Pla
             if y >= area.bottom() {
                 break;
             }
-            let name = token_name(token);
+            let name = token.to_string();
             buf.set_string(area.x, y, &name, Style::default().fg(Color::Cyan));
             y += 1;
 
             if y >= area.bottom() {
                 break;
             }
-            let desc = token_description(token);
-            buf.set_string(area.x + 2, y, &desc, Style::default().fg(Color::DarkGray));
+            let desc = token.description();
+            buf.set_string(area.x + 2, y, desc, Style::default().fg(Color::DarkGray));
             y += 1;
         }
     }
 }
 
-fn token_name(token: &sabacc_core::shift_token::ShiftToken) -> String {
-    use sabacc_core::shift_token::ShiftToken;
-    match token {
-        ShiftToken::FreeDraw => "FreeDraw".into(),
-        ShiftToken::Refund => "Refund".into(),
-        ShiftToken::ExtraRefund => "ExtraRefund".into(),
-        ShiftToken::GeneralTariff => "GeneralTariff".into(),
-        ShiftToken::TargetTariff(_) => "TargetTariff".into(),
-        ShiftToken::Embargo => "Embargo".into(),
-        ShiftToken::Markdown => "Markdown".into(),
-        ShiftToken::Immunity => "Immunity".into(),
-        ShiftToken::GeneralAudit => "GeneralAudit".into(),
-        ShiftToken::TargetAudit(_) => "TargetAudit".into(),
-        ShiftToken::MajorFraud => "MajorFraud".into(),
-        ShiftToken::Embezzlement => "Embezzlement".into(),
-        ShiftToken::CookTheBooks => "CookTheBooks".into(),
-        ShiftToken::Exhaustion(_) => "Exhaustion".into(),
-        ShiftToken::DirectTransaction(_) => "DirectTransaction".into(),
-        ShiftToken::PrimeSabacc => "PrimeSabacc".into(),
-    }
-}
-
-fn token_description(token: &sabacc_core::shift_token::ShiftToken) -> String {
-    use sabacc_core::shift_token::ShiftToken;
-    match token {
-        ShiftToken::FreeDraw => "Free draw".into(),
-        ShiftToken::Refund => "Recover 2 chips".into(),
-        ShiftToken::ExtraRefund => "Recover 3 chips".into(),
-        ShiftToken::GeneralTariff => "All pay 1 chip".into(),
-        ShiftToken::TargetTariff(_) => "Target pays 2 chips".into(),
-        ShiftToken::Embargo => "Next must Stand".into(),
-        ShiftToken::Markdown => "Sylop = 0".into(),
-        ShiftToken::Immunity => "Token immunity".into(),
-        ShiftToken::GeneralAudit => "Standing pay 2 chips".into(),
-        ShiftToken::TargetAudit(_) => "Target standing pays 3".into(),
-        ShiftToken::MajorFraud => "Impostor locked at 6".into(),
-        ShiftToken::Embezzlement => "1 chip per opponent".into(),
-        ShiftToken::CookTheBooks => "Reverse ranking".into(),
-        ShiftToken::Exhaustion(_) => "Target redraws hand".into(),
-        ShiftToken::DirectTransaction(_) => "Swap hand w/ target".into(),
-        ShiftToken::PrimeSabacc => "Dice → best Sabacc".into(),
-    }
-}

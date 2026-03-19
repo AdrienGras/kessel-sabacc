@@ -111,6 +111,21 @@ pub enum GamePhase {
     },
 }
 
+/// Per-turn ephemeral state that is reset between turns/rounds.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TurnEphemeral {
+    /// Players who chose Stand this turn (for Audit resolution).
+    pub stood_this_turn: Vec<PlayerId>,
+    /// Player forced to Stand by Embargo (if any).
+    pub embargoed_player: Option<PlayerId>,
+    /// Whether a shift token has been played this turn by the current player.
+    pub token_played_this_turn: bool,
+    /// Whether FreeDraw is active for the current player's draw.
+    pub free_draw_active: bool,
+    /// Pending audit effects.
+    pub pending_audit: PendingAudit,
+}
+
 /// The complete game state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameState {
@@ -134,16 +149,8 @@ pub struct GameState {
     pub modifiers: ActiveModifiers,
     /// Game configuration.
     pub config: GameConfig,
-    /// Players who chose Stand this turn (for Audit resolution).
-    pub stood_this_turn: Vec<PlayerId>,
-    /// Player forced to Stand by Embargo (if any).
-    pub embargoed_player: Option<PlayerId>,
-    /// Whether a shift token has been played this turn by the current player.
-    pub token_played_this_turn: bool,
-    /// Whether FreeDraw is active for the current player's draw.
-    pub free_draw_active: bool,
-    /// Pending audit effects.
-    pub pending_audit: PendingAudit,
+    /// Per-turn ephemeral state.
+    pub turn_state: TurnEphemeral,
     /// Order in which players were eliminated: (player_id, round_number).
     pub elimination_order: Vec<(PlayerId, u8)>,
     /// Aggregate game statistics.
@@ -216,11 +223,7 @@ pub fn new_game(config: GameConfig, rng: &mut impl Rng) -> Result<GameState, Gam
         credits_in_pot,
         modifiers: ActiveModifiers::default(),
         config,
-        stood_this_turn: Vec::new(),
-        embargoed_player: None,
-        token_played_this_turn: false,
-        free_draw_active: false,
-        pending_audit: PendingAudit::default(),
+        turn_state: TurnEphemeral::default(),
         elimination_order: Vec::new(),
         stats,
     })
@@ -270,7 +273,7 @@ pub fn available_actions(state: &GameState) -> Vec<Action> {
 
             // Shift token actions (if not already played this turn)
             if state.config.enable_shift_tokens
-                && !state.token_played_this_turn
+                && !state.turn_state.token_played_this_turn
                 && !player.shift_tokens.is_empty()
             {
                 for token in &player.shift_tokens {
@@ -282,7 +285,7 @@ pub fn available_actions(state: &GameState) -> Vec<Action> {
             }
 
             // If embargoed, only Stand is available
-            if state.embargoed_player == Some(pid) {
+            if state.turn_state.embargoed_player == Some(pid) {
                 actions.push(Action::PlayerAction {
                     player_id: pid,
                     action: TurnAction::Stand,
@@ -296,7 +299,7 @@ pub fn available_actions(state: &GameState) -> Vec<Action> {
             });
 
             // Can draw if player has chips or FreeDraw is active
-            if player.chips > 0 || state.free_draw_active {
+            if player.chips > 0 || state.turn_state.free_draw_active {
                 for source in [
                     DrawSource::SandDeck,
                     DrawSource::BloodDeck,
@@ -375,7 +378,7 @@ pub fn advance_bots(
                 }
 
                 // Bot may play a token first
-                if state.config.enable_shift_tokens && !state.token_played_this_turn {
+                if state.config.enable_shift_tokens && !state.turn_state.token_played_this_turn {
                     if let Some(token_action) = bot.choose_token(&state, rng) {
                         state = apply_action(state, token_action, rng)?;
                         // After token, loop back (might be PrimeSabaccChoice or still TurnAction)
@@ -515,7 +518,7 @@ fn apply_player_action(
     }
 
     // Embargo check: if this player is embargoed, they must Stand
-    if let Some(embargoed_id) = state.embargoed_player {
+    if let Some(embargoed_id) = state.turn_state.embargoed_player {
         if embargoed_id == player_id && !matches!(action, TurnAction::Stand) {
             return Err(GameError::InvalidActionForPhase {
                 reason: "player is embargoed and must Stand".into(),
@@ -528,18 +531,18 @@ fn apply_player_action(
             if let Some(ps) = state.stats.get_mut(player_id) {
                 ps.stands_count += 1;
             }
-            state.stood_this_turn.push(player_id);
+            state.turn_state.stood_this_turn.push(player_id);
             // Clear embargo after the embargoed player stands
-            if state.embargoed_player == Some(player_id) {
-                state.embargoed_player = None;
+            if state.turn_state.embargoed_player == Some(player_id) {
+                state.turn_state.embargoed_player = None;
             }
             advance_turn(&mut state, rng)?;
             Ok(state)
         }
         TurnAction::Draw(source) => {
             // Pay 1 chip (unless FreeDraw is active)
-            if state.free_draw_active {
-                state.free_draw_active = false;
+            if state.turn_state.free_draw_active {
+                state.turn_state.free_draw_active = false;
             } else {
                 state.players[state.current_player_idx].pay_chip()?;
             }
@@ -694,11 +697,7 @@ fn apply_advance_round(
                 }
             }
             // Record chip history snapshots
-            for player in &state.players {
-                if let Some(ps) = state.stats.player_stats.iter_mut().find(|s| s.player_id == player.id) {
-                    ps.chips_history.push(player.chips);
-                }
-            }
+            state.stats.record_round_chips(&state.players);
 
             // Track newly eliminated players
             let current_round = state.round;
@@ -728,12 +727,7 @@ fn apply_advance_round(
             state.current_player_idx = 0;
             state.modifiers = ActiveModifiers::default();
 
-            // Reset per-turn state
-            state.stood_this_turn.clear();
-            state.embargoed_player = None;
-            state.token_played_this_turn = false;
-            state.free_draw_active = false;
-            state.pending_audit = PendingAudit::default();
+            state.turn_state = TurnEphemeral::default();
 
             round::deal_hands(
                 &mut state.players,
@@ -756,8 +750,8 @@ fn apply_advance_round(
 /// Advance to the next player/turn, or begin revelation if turn 3 is complete.
 fn advance_turn(state: &mut GameState, _rng: &mut impl Rng) -> Result<(), GameError> {
     // Reset per-player token state
-    state.token_played_this_turn = false;
-    state.free_draw_active = false;
+    state.turn_state.token_played_this_turn = false;
+    state.turn_state.free_draw_active = false;
 
     // Move to next player
     state.current_player_idx += 1;
@@ -775,9 +769,9 @@ fn advance_turn(state: &mut GameState, _rng: &mut impl Rng) -> Result<(), GameEr
         resolve_audits(state);
 
         // Reset per-turn state
-        state.stood_this_turn.clear();
-        state.embargoed_player = None;
-        state.pending_audit = PendingAudit::default();
+        state.turn_state.stood_this_turn.clear();
+        state.turn_state.embargoed_player = None;
+        state.turn_state.pending_audit = PendingAudit::default();
 
         if state.turn >= 3 {
             // End of turn 3: begin revelation
@@ -800,9 +794,9 @@ fn resolve_audits(state: &mut GameState) {
     let immune = &state.modifiers.immune_players;
 
     // GeneralAudit: all Stand players (except source, except immune) lose 2 chips
-    if state.pending_audit.general {
-        let source = state.pending_audit.general_source;
-        for pid in &state.stood_this_turn {
+    if state.turn_state.pending_audit.general {
+        let source = state.turn_state.pending_audit.general_source;
+        for pid in &state.turn_state.stood_this_turn {
             if source == Some(*pid) || immune.contains(pid) {
                 continue;
             }
@@ -816,8 +810,8 @@ fn resolve_audits(state: &mut GameState) {
     }
 
     // TargetAudit: if target stood and is not immune, lose 3 chips
-    if let Some(target_id) = state.pending_audit.target {
-        if state.stood_this_turn.contains(&target_id) && !immune.contains(&target_id) {
+    if let Some(target_id) = state.turn_state.pending_audit.target {
+        if state.turn_state.stood_this_turn.contains(&target_id) && !immune.contains(&target_id) {
             if let Some(player) = state.players.iter_mut().find(|p| p.id == target_id) {
                 player.apply_penalty(3);
             }
@@ -828,21 +822,17 @@ fn resolve_audits(state: &mut GameState) {
     }
 }
 
-/// Apply a shift token action.
-fn apply_shift_token(
-    mut state: GameState,
+/// Validate that a shift token can be played.
+fn validate_shift_token(
+    state: &GameState,
     player_id: PlayerId,
-    token: ShiftToken,
-    rng: &mut impl Rng,
-) -> Result<GameState, GameError> {
-    // Must be in TurnAction phase
+    token: &ShiftToken,
+) -> Result<(), GameError> {
     if !matches!(state.phase, GamePhase::TurnAction) {
         return Err(GameError::InvalidActionForPhase {
             reason: "not in TurnAction phase".into(),
         });
     }
-
-    // Must be current player
     let current = &state.players[state.current_player_idx];
     if current.id != player_id {
         return Err(GameError::NotPlayerTurn { player_id });
@@ -850,20 +840,14 @@ fn apply_shift_token(
     if current.is_eliminated {
         return Err(GameError::PlayerEliminated { player_id });
     }
-
-    // Only one token per turn
-    if state.token_played_this_turn {
+    if state.turn_state.token_played_this_turn {
         return Err(GameError::ShiftTokenAlreadyPlayed);
     }
-
-    // Player must own the token
-    if !current.has_token(&token) {
+    if !current.has_token(token) {
         return Err(GameError::ShiftTokenNotOwned { player_id });
     }
-
-    // Validate target for targeted tokens
     if token.requires_target() {
-        let target_id = match &token {
+        let target_id = match token {
             ShiftToken::TargetTariff(t)
             | ShiftToken::TargetAudit(t)
             | ShiftToken::Exhaustion(t)
@@ -890,56 +874,32 @@ fn apply_shift_token(
             });
         }
     }
+    Ok(())
+}
 
-    let immune = state.modifiers.immune_players.clone();
-
-    // Apply token effect
-    match &token {
+/// Apply economic token effects (FreeDraw, Refund, ExtraRefund, Embezzlement).
+fn apply_economic_token(
+    state: &mut GameState,
+    player_id: PlayerId,
+    token: &ShiftToken,
+    immune: &[PlayerId],
+) -> Result<(), GameError> {
+    match token {
         ShiftToken::FreeDraw => {
-            state.free_draw_active = true;
+            state.turn_state.free_draw_active = true;
         }
-
         ShiftToken::Refund => {
-            let player = &state.players[state.current_player_idx];
-            if player.pot == 0 {
+            if state.players[state.current_player_idx].pot == 0 {
                 return Err(GameError::NoInvestedChips { player_id });
             }
             state.players[state.current_player_idx].refund_chips(2);
         }
-
         ShiftToken::ExtraRefund => {
-            let player = &state.players[state.current_player_idx];
-            if player.pot == 0 {
+            if state.players[state.current_player_idx].pot == 0 {
                 return Err(GameError::NoInvestedChips { player_id });
             }
             state.players[state.current_player_idx].refund_chips(3);
         }
-
-        ShiftToken::GeneralTariff => {
-            for i in 0..state.players.len() {
-                let p = &state.players[i];
-                if p.id != player_id && !p.is_eliminated && !immune.contains(&p.id) {
-                    let affected_id = state.players[i].id;
-                    state.players[i].apply_penalty(1);
-                    if let Some(ps) = state.stats.get_mut(affected_id) {
-                        ps.chips_lost_to_tariffs += 1;
-                    }
-                }
-            }
-        }
-
-        ShiftToken::TargetTariff(target_id) => {
-            let tid = *target_id;
-            if !immune.contains(&tid) {
-                if let Some(target) = state.players.iter_mut().find(|p| p.id == tid) {
-                    target.apply_penalty(2);
-                }
-                if let Some(ps) = state.stats.get_mut(tid) {
-                    ps.chips_lost_to_tariffs += 2;
-                }
-            }
-        }
-
         ShiftToken::Embezzlement => {
             let mut stolen = 0u8;
             for i in 0..state.players.len() {
@@ -956,88 +916,102 @@ fn apply_shift_token(
             }
             state.players[state.current_player_idx].chips += stolen;
         }
+        _ => {}
+    }
+    Ok(())
+}
 
-        ShiftToken::GeneralAudit => {
-            state.pending_audit.general = true;
-            state.pending_audit.general_source = Some(player_id);
-        }
-
-        ShiftToken::TargetAudit(target_id) => {
-            state.pending_audit.target = Some(*target_id);
-        }
-
-        ShiftToken::Markdown => {
-            state.modifiers.markdown_active = true;
-        }
-
-        ShiftToken::CookTheBooks => {
-            state.modifiers.cook_the_books_active = true;
-        }
-
-        ShiftToken::MajorFraud => {
-            state.modifiers.major_fraud_active = true;
-        }
-
-        ShiftToken::Immunity => {
-            state.modifiers.immune_players.push(player_id);
-        }
-
-        ShiftToken::PrimeSabacc => {
-            let die1: u8 = rng.gen_range(1..=6);
-            let die2: u8 = rng.gen_range(1..=6);
-
-            // Remove the token first
-            state.players[state.current_player_idx].remove_token(&token)?;
-            state.token_played_this_turn = true;
-            if let Some(ps) = state.stats.get_mut(player_id) {
-                ps.tokens_played += 1;
+/// Apply tariff token effects (GeneralTariff, TargetTariff).
+fn apply_tariff_token(
+    state: &mut GameState,
+    player_id: PlayerId,
+    token: &ShiftToken,
+    immune: &[PlayerId],
+) {
+    match token {
+        ShiftToken::GeneralTariff => {
+            for i in 0..state.players.len() {
+                let p = &state.players[i];
+                if p.id != player_id && !p.is_eliminated && !immune.contains(&p.id) {
+                    let affected_id = state.players[i].id;
+                    state.players[i].apply_penalty(1);
+                    if let Some(ps) = state.stats.get_mut(affected_id) {
+                        ps.chips_lost_to_tariffs += 1;
+                    }
+                }
             }
-
-            state.phase = GamePhase::PrimeSabaccChoice {
-                player_id,
-                die1,
-                die2,
-            };
-
-            // Return early since we already removed the token
-            return Ok(state);
         }
+        ShiftToken::TargetTariff(target_id) => {
+            let tid = *target_id;
+            if !immune.contains(&tid) {
+                if let Some(target) = state.players.iter_mut().find(|p| p.id == tid) {
+                    target.apply_penalty(2);
+                }
+                if let Some(ps) = state.stats.get_mut(tid) {
+                    ps.chips_lost_to_tariffs += 2;
+                }
+            }
+        }
+        _ => {}
+    }
+}
 
+/// Apply audit token effects (GeneralAudit, TargetAudit).
+fn apply_audit_token(state: &mut GameState, player_id: PlayerId, token: &ShiftToken) {
+    match token {
+        ShiftToken::GeneralAudit => {
+            state.turn_state.pending_audit.general = true;
+            state.turn_state.pending_audit.general_source = Some(player_id);
+        }
+        ShiftToken::TargetAudit(target_id) => {
+            state.turn_state.pending_audit.target = Some(*target_id);
+        }
+        _ => {}
+    }
+}
+
+/// Apply modifier token effects (Markdown, CookTheBooks, MajorFraud, Immunity).
+fn apply_modifier_token(state: &mut GameState, player_id: PlayerId, token: &ShiftToken) {
+    match token {
+        ShiftToken::Markdown => state.modifiers.markdown_active = true,
+        ShiftToken::CookTheBooks => state.modifiers.cook_the_books_active = true,
+        ShiftToken::MajorFraud => state.modifiers.major_fraud_active = true,
+        ShiftToken::Immunity => state.modifiers.immune_players.push(player_id),
+        _ => {}
+    }
+}
+
+/// Apply interaction token effects (Embargo, Exhaustion, DirectTransaction).
+fn apply_interaction_token(
+    state: &mut GameState,
+    token: &ShiftToken,
+    immune: &[PlayerId],
+    rng: &mut impl Rng,
+) -> Result<(), GameError> {
+    match token {
         ShiftToken::Embargo => {
-            // Find the next non-eliminated player
             let num = state.players.len();
             let mut next_idx = state.current_player_idx + 1;
-            let mut found = None;
-            for _ in 0..num {
-                if next_idx >= num {
-                    // Wrap around is not meaningful in same turn; just check remaining
-                    break;
-                }
+            while next_idx < num {
                 let p = &state.players[next_idx];
                 if !p.is_eliminated {
-                    found = Some(p.id);
+                    if !immune.contains(&p.id) {
+                        state.turn_state.embargoed_player = Some(p.id);
+                    }
                     break;
                 }
                 next_idx += 1;
             }
-            if let Some(next_id) = found {
-                if !immune.contains(&next_id) {
-                    state.embargoed_player = Some(next_id);
-                }
-            }
         }
-
         ShiftToken::Exhaustion(target_id) => {
             let tid = *target_id;
             if !immune.contains(&tid) {
-                // Discard target's hand and redraw
                 if let Some(target) = state.players.iter_mut().find(|p| p.id == tid) {
                     if let Some(hand) = target.hand.take() {
                         state.sand_deck.discard(hand.sand);
                         state.blood_deck.discard(hand.blood);
                     }
                 }
-                // Draw new hand for target
                 let new_sand = state.sand_deck.draw(rng)?;
                 let new_blood = state.blood_deck.draw(rng)?;
                 let new_hand = crate::hand::Hand::new(new_sand, new_blood)?;
@@ -1046,7 +1020,6 @@ fn apply_shift_token(
                 }
             }
         }
-
         ShiftToken::DirectTransaction(target_id) => {
             let tid = *target_id;
             if !immune.contains(&tid) {
@@ -1056,19 +1029,68 @@ fn apply_shift_token(
                     .iter()
                     .position(|p| p.id == tid)
                     .ok_or(GameError::PlayerNotFound { player_id: tid })?;
-
-                // Swap hands
                 let player_hand = state.players[player_idx].hand.take();
                 let target_hand = state.players[target_idx].hand.take();
                 state.players[player_idx].hand = target_hand;
                 state.players[target_idx].hand = player_hand;
             }
         }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Apply a shift token action.
+fn apply_shift_token(
+    mut state: GameState,
+    player_id: PlayerId,
+    token: ShiftToken,
+    rng: &mut impl Rng,
+) -> Result<GameState, GameError> {
+    validate_shift_token(&state, player_id, &token)?;
+
+    let immune = state.modifiers.immune_players.clone();
+
+    // PrimeSabacc has special handling (changes phase, returns early)
+    if matches!(token, ShiftToken::PrimeSabacc) {
+        let die1: u8 = rng.gen_range(1..=6);
+        let die2: u8 = rng.gen_range(1..=6);
+        state.players[state.current_player_idx].remove_token(&token)?;
+        state.turn_state.token_played_this_turn = true;
+        if let Some(ps) = state.stats.get_mut(player_id) {
+            ps.tokens_played += 1;
+        }
+        state.phase = GamePhase::PrimeSabaccChoice {
+            player_id,
+            die1,
+            die2,
+        };
+        return Ok(state);
+    }
+
+    // Apply token effect by category
+    match &token {
+        ShiftToken::FreeDraw | ShiftToken::Refund | ShiftToken::ExtraRefund | ShiftToken::Embezzlement => {
+            apply_economic_token(&mut state, player_id, &token, &immune)?;
+        }
+        ShiftToken::GeneralTariff | ShiftToken::TargetTariff(_) => {
+            apply_tariff_token(&mut state, player_id, &token, &immune);
+        }
+        ShiftToken::GeneralAudit | ShiftToken::TargetAudit(_) => {
+            apply_audit_token(&mut state, player_id, &token);
+        }
+        ShiftToken::Markdown | ShiftToken::CookTheBooks | ShiftToken::MajorFraud | ShiftToken::Immunity => {
+            apply_modifier_token(&mut state, player_id, &token);
+        }
+        ShiftToken::Embargo | ShiftToken::Exhaustion(_) | ShiftToken::DirectTransaction(_) => {
+            apply_interaction_token(&mut state, &token, &immune, rng)?;
+        }
+        ShiftToken::PrimeSabacc => unreachable!(),
     }
 
     // Remove token and mark as played
     state.players[state.current_player_idx].remove_token(&token)?;
-    state.token_played_this_turn = true;
+    state.turn_state.token_played_this_turn = true;
     if let Some(ps) = state.stats.get_mut(player_id) {
         ps.tokens_played += 1;
     }
@@ -1145,7 +1167,11 @@ fn skip_eliminated(state: &mut GameState) {
     }
 }
 
-/// A dummy RNG that panics if used. Used in code paths that don't need randomness.
+/// A dummy RNG that panics if called.
+///
+/// Used in `apply_choose_discard` where `advance_turn` requires an `&mut impl Rng`
+/// parameter but the code path never actually generates random numbers.
+/// Panics on any call to ensure this invariant is upheld.
 struct DummyRng;
 
 impl rand::RngCore for DummyRng {

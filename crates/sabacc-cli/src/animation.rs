@@ -2,19 +2,13 @@
 use std::collections::VecDeque;
 
 use ratatui::style::Color;
-use sabacc_core::{card::Family, PlayerId};
+use sabacc_core::PlayerId;
 
 /// A single animation to play.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum Animation {
-    /// Flash a card briefly.
-    CardFlash {
-        player_id: PlayerId,
-        family: Family,
-        duration_ms: u64,
-    },
-    /// Show chip gain/loss on a player.
+    /// Show chip gain/loss on a player (reserved for future use).
+    #[allow(dead_code)]
     ChipChange {
         player_id: PlayerId,
         delta: i8,
@@ -23,14 +17,14 @@ pub enum Animation {
     /// Highlight a player's row.
     PlayerHighlight {
         player_id: PlayerId,
+        #[allow(dead_code)]
         color: Color,
         duration_ms: u64,
     },
-    /// Reveal a player's cards.
-    CardReveal { player_id: PlayerId, delay_ms: u64 },
     /// Add a message to the log.
     LogMessage { text: String },
-    /// Wait without visual effect.
+    /// Wait without visual effect (used in tests).
+    #[allow(dead_code)]
     Pause { duration_ms: u64 },
 }
 
@@ -48,11 +42,9 @@ impl Animation {
     /// Instant animations (LogMessage) return 0.
     pub fn duration_ms(&self) -> u64 {
         match self {
-            Self::CardFlash { duration_ms, .. }
-            | Self::ChipChange { duration_ms, .. }
+            Self::ChipChange { duration_ms, .. }
             | Self::PlayerHighlight { duration_ms, .. }
             | Self::Pause { duration_ms, .. } => *duration_ms,
-            Self::CardReveal { delay_ms, .. } => *delay_ms,
             Self::LogMessage { .. } => 0,
         }
     }

@@ -87,7 +87,7 @@ fn shift_token_free_draw() {
 
     // Should still be in TurnAction
     assert!(matches!(state.phase, GamePhase::TurnAction));
-    assert!(state.free_draw_active);
+    assert!(state.turn_state.free_draw_active);
     assert!(state.players[0].shift_tokens.is_empty());
 
     // Now draw — should not cost a chip
@@ -258,7 +258,7 @@ fn shift_token_embargo() {
     )
     .unwrap();
 
-    assert_eq!(state.embargoed_player, Some(1));
+    assert_eq!(state.turn_state.embargoed_player, Some(1));
 
     // P0 stands
     state = game::apply_action(
@@ -313,7 +313,7 @@ fn shift_token_markdown() {
     // Verify scoring effect: Sylop + 3 should be NonSabacc{3} instead of SylopSabacc{3}
     let hand = Hand::new(Card::sylop(Family::Sand), Card::number(Family::Blood, 3)).unwrap();
     let rank =
-        sabacc_core::scoring::evaluate_hand(&hand, None, &state.modifiers).unwrap();
+        sabacc_core::scoring::evaluate_hand(&hand, None, &state.modifiers, 0).unwrap();
     assert_eq!(
         rank,
         sabacc_core::hand::HandRank::NonSabacc { difference: 3 }
@@ -433,7 +433,7 @@ fn shift_token_immunity_blocks_embargo() {
     .unwrap();
 
     // P1 should not be embargoed (immune)
-    assert_eq!(state.embargoed_player, None);
+    assert_eq!(state.turn_state.embargoed_player, None);
 }
 
 #[test]
@@ -579,7 +579,7 @@ fn shift_token_major_fraud() {
     )
     .unwrap();
 
-    let rank = sabacc_core::scoring::evaluate_hand(&hand, None, &state.modifiers).unwrap();
+    let rank = sabacc_core::scoring::evaluate_hand(&hand, None, &state.modifiers, 0).unwrap();
     assert_eq!(
         rank,
         sabacc_core::hand::HandRank::NonSabacc { difference: 3 }
@@ -995,7 +995,7 @@ fn major_fraud_forces_impostor_to_6() {
     .unwrap();
 
     // No impostor choice needed when MajorFraud is active
-    let rank = sabacc_core::scoring::evaluate_hand(&hand, None, &mods).unwrap();
+    let rank = sabacc_core::scoring::evaluate_hand(&hand, None, &mods, 0).unwrap();
     assert_eq!(rank, sabacc_core::hand::HandRank::Sabacc { pair_value: 6 });
 }
 

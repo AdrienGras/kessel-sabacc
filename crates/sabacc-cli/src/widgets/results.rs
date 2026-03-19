@@ -25,7 +25,7 @@ pub fn render_round_results(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
     let content_height = results.len() as u16 * 3 + 2; // 3 lines per player + padding
     let popup_w = (area.width.saturating_sub(4)).min(92);
     let popup_h = (area.height.saturating_sub(2)).min(content_height + 4); // +4 for borders+title+footer
-    let popup = centered_popup(area, popup_w, popup_h);
+    let popup = super::centered_popup(area, popup_w, popup_h);
     Clear.render(popup, buf);
 
     let block = Block::default()
@@ -247,7 +247,7 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
     let content_h = (standings.len() as u16 + 14).max(16);
     let popup_w = (area.width.saturating_sub(4)).min(90);
     let popup_h = (area.height.saturating_sub(2)).min(content_h + 4);
-    let popup = centered_popup(area, popup_w, popup_h);
+    let popup = super::centered_popup(area, popup_w, popup_h);
     Clear.render(popup, buf);
 
     let block = Block::default()
@@ -472,14 +472,6 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
     buf.set_string(hint_x, footer_y, hint, Style::default().fg(Color::DarkGray));
 }
 
-/// Create a centered rectangle within `area`.
-fn centered_popup(area: Rect, width: u16, height: u16) -> Rect {
-    let w = width.min(area.width);
-    let h = height.min(area.height);
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
-    Rect::new(x, y, w, h)
-}
 
 /// Render chip count as ● (filled) dots, max 8.
 fn chip_dots(count: u8) -> String {

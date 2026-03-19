@@ -13,6 +13,17 @@ pub enum DrawSource {
     BloodDiscard,
 }
 
+impl std::fmt::Display for DrawSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DrawSource::SandDeck => write!(f, "Deck S"),
+            DrawSource::BloodDeck => write!(f, "Deck B"),
+            DrawSource::SandDiscard => write!(f, "Dis S"),
+            DrawSource::BloodDiscard => write!(f, "Dis B"),
+        }
+    }
+}
+
 impl DrawSource {
     /// Get the family associated with this draw source.
     pub fn family(&self) -> Family {

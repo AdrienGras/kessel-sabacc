@@ -1,6 +1,6 @@
 use rand::Rng;
 
-use crate::card::{CardValue, Family};
+use crate::card::CardValue;
 use crate::deck::FamilyDeck;
 use crate::error::GameError;
 use crate::hand::Hand;
@@ -86,7 +86,7 @@ pub fn resolve(
             });
         }
 
-        let rank = scoring::evaluate_hand(hand, choice, modifiers)?;
+        let rank = scoring::evaluate_hand(hand, choice, modifiers, player.id)?;
         evaluated.push((player.id, rank, player.pot));
     }
 
@@ -113,17 +113,11 @@ pub fn apply_results(
         }
     }
 
-    // Return all hands to decks
+    // Return all hands to decks (Hand guarantees sand=Sand, blood=Blood)
     for player in players.iter_mut() {
         if let Some(hand) = player.hand.take() {
-            match hand.sand.family {
-                Family::Sand => sand_deck.discard(hand.sand),
-                Family::Blood => blood_deck.discard(hand.sand),
-            }
-            match hand.blood.family {
-                Family::Sand => sand_deck.discard(hand.blood),
-                Family::Blood => blood_deck.discard(hand.blood),
-            }
+            sand_deck.discard(hand.sand);
+            blood_deck.discard(hand.blood);
         }
     }
 }
@@ -145,7 +139,7 @@ pub fn check_game_over(players: &[Player]) -> Option<PlayerId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::card::Card;
+    use crate::card::{Card, Family};
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
 

@@ -40,7 +40,52 @@ pub enum ShiftToken {
     PrimeSabacc,
 }
 
+impl std::fmt::Display for ShiftToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShiftToken::FreeDraw => write!(f, "FreeDraw"),
+            ShiftToken::Refund => write!(f, "Refund"),
+            ShiftToken::ExtraRefund => write!(f, "ExtraRefund"),
+            ShiftToken::GeneralTariff => write!(f, "GeneralTariff"),
+            ShiftToken::TargetTariff(_) => write!(f, "TargetTariff"),
+            ShiftToken::Embargo => write!(f, "Embargo"),
+            ShiftToken::Markdown => write!(f, "Markdown"),
+            ShiftToken::Immunity => write!(f, "Immunity"),
+            ShiftToken::GeneralAudit => write!(f, "GeneralAudit"),
+            ShiftToken::TargetAudit(_) => write!(f, "TargetAudit"),
+            ShiftToken::MajorFraud => write!(f, "MajorFraud"),
+            ShiftToken::Embezzlement => write!(f, "Embezzlement"),
+            ShiftToken::CookTheBooks => write!(f, "CookTheBooks"),
+            ShiftToken::Exhaustion(_) => write!(f, "Exhaustion"),
+            ShiftToken::DirectTransaction(_) => write!(f, "DirectTransaction"),
+            ShiftToken::PrimeSabacc => write!(f, "PrimeSabacc"),
+        }
+    }
+}
+
 impl ShiftToken {
+    /// Short description of what this token does.
+    pub fn description(&self) -> &'static str {
+        match self {
+            ShiftToken::FreeDraw => "Draw without paying 1 chip",
+            ShiftToken::Refund => "Recover 2 invested chips",
+            ShiftToken::ExtraRefund => "Recover 3 invested chips",
+            ShiftToken::GeneralTariff => "All others pay 1 chip",
+            ShiftToken::TargetTariff(_) => "Targeted player pays 2 chips",
+            ShiftToken::Embargo => "Next player must Stand",
+            ShiftToken::Markdown => "Sylop = 0 (no match)",
+            ShiftToken::Immunity => "Immune to opponent tokens",
+            ShiftToken::GeneralAudit => "Standing players pay 2 chips",
+            ShiftToken::TargetAudit(_) => "Targeted standing pays 3 chips",
+            ShiftToken::MajorFraud => "Impostor locked at 6",
+            ShiftToken::Embezzlement => "Take 1 chip from each opponent",
+            ShiftToken::CookTheBooks => "Reverse Sabacc ranking",
+            ShiftToken::Exhaustion(_) => "Target redraws a new hand",
+            ShiftToken::DirectTransaction(_) => "Swap hand with target",
+            ShiftToken::PrimeSabacc => "Dice → value = best Sabacc",
+        }
+    }
+
     /// Compare token types by discriminant, ignoring inner values.
     pub fn matches_type(&self, other: &ShiftToken) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)

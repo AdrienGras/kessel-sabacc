@@ -15,7 +15,7 @@ fn markdown_pure_sabacc_stays_pure() {
         ..Default::default()
     };
     let hand = Hand::new(Card::sylop(Family::Sand), Card::sylop(Family::Blood)).unwrap();
-    let rank = scoring::evaluate_hand(&hand, None, &mods).unwrap();
+    let rank = scoring::evaluate_hand(&hand, None, &mods, 0).unwrap();
     assert_eq!(rank, HandRank::PureSabacc);
 }
 
@@ -26,7 +26,7 @@ fn markdown_sylop_becomes_non_sabacc() {
         ..Default::default()
     };
     let hand = Hand::new(Card::sylop(Family::Sand), Card::number(Family::Blood, 5)).unwrap();
-    let rank = scoring::evaluate_hand(&hand, None, &mods).unwrap();
+    let rank = scoring::evaluate_hand(&hand, None, &mods, 0).unwrap();
     assert_eq!(rank, HandRank::NonSabacc { difference: 5 });
 }
 
@@ -114,7 +114,7 @@ fn major_fraud_impostor_matches_6() {
     )
     .unwrap();
     // No impostor choice needed with MajorFraud
-    let rank = scoring::evaluate_hand(&hand, None, &mods).unwrap();
+    let rank = scoring::evaluate_hand(&hand, None, &mods, 0).unwrap();
     assert_eq!(rank, HandRank::Sabacc { pair_value: 6 });
 }
 
@@ -129,7 +129,7 @@ fn major_fraud_impostor_no_match() {
         Card::number(Family::Blood, 3),
     )
     .unwrap();
-    let rank = scoring::evaluate_hand(&hand, None, &mods).unwrap();
+    let rank = scoring::evaluate_hand(&hand, None, &mods, 0).unwrap();
     assert_eq!(rank, HandRank::NonSabacc { difference: 3 }); // 6 - 3 = 3
 }
 
@@ -145,7 +145,7 @@ fn major_fraud_double_impostor_sabacc_6() {
     )
     .unwrap();
     // Both forced to 6 → Sabacc{6}
-    let rank = scoring::evaluate_hand(&hand, None, &mods).unwrap();
+    let rank = scoring::evaluate_hand(&hand, None, &mods, 0).unwrap();
     assert_eq!(rank, HandRank::Sabacc { pair_value: 6 });
 }
 
@@ -218,6 +218,6 @@ fn markdown_plus_major_fraud_impostor_sylop() {
         Card::sylop(Family::Blood),
     )
     .unwrap();
-    let rank = scoring::evaluate_hand(&hand, None, &mods).unwrap();
+    let rank = scoring::evaluate_hand(&hand, None, &mods, 0).unwrap();
     assert_eq!(rank, HandRank::NonSabacc { difference: 6 });
 }

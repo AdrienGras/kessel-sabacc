@@ -80,21 +80,14 @@ pub fn evaluate_hand(
     hand: &Hand,
     impostor_choice: Option<&ImpostorChoice>,
     modifiers: &ActiveModifiers,
+    player_id: PlayerId,
 ) -> Result<HandRank, GameError> {
-    let sand_value = resolve_card_value(&hand.sand.value, impostor_choice, true, modifiers)?;
-    let blood_value = resolve_card_value(&hand.blood.value, impostor_choice, false, modifiers)?;
+    let sand_value = resolve_card_value(&hand.sand.value, impostor_choice, true, modifiers, player_id)?;
+    let blood_value = resolve_card_value(&hand.blood.value, impostor_choice, false, modifiers, player_id)?;
 
     match (sand_value, blood_value) {
-        // Both Sylops -> Pure Sabacc (unless markdown makes them 0)
-        (ResolvedValue::Sylop, ResolvedValue::Sylop) => {
-            if modifiers.markdown_active {
-                // Both marked down to 0, that's still a Pure Sabacc
-                // (two Sylops always form Pure Sabacc regardless of markdown)
-                Ok(HandRank::PureSabacc)
-            } else {
-                Ok(HandRank::PureSabacc)
-            }
-        }
+        // Both Sylops -> Pure Sabacc (always, regardless of markdown)
+        (ResolvedValue::Sylop, ResolvedValue::Sylop) => Ok(HandRank::PureSabacc),
         // One Sylop + one number
         (ResolvedValue::Sylop, ResolvedValue::Number(v))
         | (ResolvedValue::Number(v), ResolvedValue::Sylop) => {
@@ -200,6 +193,7 @@ fn resolve_card_value(
     impostor_choice: Option<&ImpostorChoice>,
     is_sand: bool,
     modifiers: &ActiveModifiers,
+    player_id: PlayerId,
 ) -> Result<ResolvedValue, GameError> {
     match value {
         CardValue::Number(n) => Ok(ResolvedValue::Number(*n)),
@@ -210,7 +204,7 @@ fn resolve_card_value(
                 return Ok(ResolvedValue::Number(6));
             }
             let choice = impostor_choice.ok_or(GameError::ImpostorChoiceRequired {
-                player_id: 0, // caller should handle this
+                player_id,
             })?;
             let chosen = if is_sand {
                 choice.sand_choice.ok_or(GameError::ImpostorChoiceRequired {
@@ -251,7 +245,7 @@ mod tests {
     #[test]
     fn pure_sabacc() {
         let hand = Hand::new(Card::sylop(Family::Sand), Card::sylop(Family::Blood)).unwrap();
-        let rank = evaluate_hand(&hand, None, &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, None, &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::PureSabacc);
     }
 
@@ -262,7 +256,7 @@ mod tests {
             Card::number(Family::Blood, 3),
         )
         .unwrap();
-        let rank = evaluate_hand(&hand, None, &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, None, &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::SylopSabacc { value: 3 });
     }
 
@@ -273,7 +267,7 @@ mod tests {
             Card::sylop(Family::Blood),
         )
         .unwrap();
-        let rank = evaluate_hand(&hand, None, &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, None, &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::SylopSabacc { value: 5 });
     }
 
@@ -284,7 +278,7 @@ mod tests {
             Card::number(Family::Blood, 4),
         )
         .unwrap();
-        let rank = evaluate_hand(&hand, None, &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, None, &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::Sabacc { pair_value: 4 });
     }
 
@@ -295,7 +289,7 @@ mod tests {
             Card::number(Family::Blood, 2),
         )
         .unwrap();
-        let rank = evaluate_hand(&hand, None, &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, None, &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::NonSabacc { difference: 4 });
     }
 
@@ -316,7 +310,7 @@ mod tests {
         };
         choice.validate().unwrap();
 
-        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::Sabacc { pair_value: 3 });
     }
 
@@ -337,7 +331,7 @@ mod tests {
         };
         choice.validate().unwrap();
 
-        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::NonSabacc { difference: 2 });
     }
 
@@ -358,7 +352,7 @@ mod tests {
         };
         choice.validate().unwrap();
 
-        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::Sabacc { pair_value: 4 });
     }
 
@@ -379,7 +373,7 @@ mod tests {
         };
         choice.validate().unwrap();
 
-        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers()).unwrap();
+        let rank = evaluate_hand(&hand, Some(&choice), &no_modifiers(), 0).unwrap();
         assert_eq!(rank, HandRank::SylopSabacc { value: 2 });
     }
 
@@ -496,7 +490,7 @@ mod tests {
         )
         .unwrap();
 
-        let rank = evaluate_hand(&hand, None, &mods).unwrap();
+        let rank = evaluate_hand(&hand, None, &mods, 0).unwrap();
         assert_eq!(rank, HandRank::NonSabacc { difference: 3 });
     }
 }

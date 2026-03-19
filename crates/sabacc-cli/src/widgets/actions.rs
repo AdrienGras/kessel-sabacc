@@ -6,8 +6,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Widget};
 
 use sabacc_core::game::GamePhase;
-use sabacc_core::shift_token::ShiftToken;
-
 use crate::app::{AppState, Overlay, ROUND_ANNOUNCE_TOTAL_TICKS};
 
 const PROGRESS_FILLED: char = '▰';
@@ -125,7 +123,7 @@ pub fn render_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
 fn render_action_bar(area: Rect, buf: &mut Buffer, app: &AppState) {
     let has_tokens = app.game.as_ref().is_some_and(|g| {
         g.config.enable_shift_tokens
-            && !g.token_played_this_turn
+            && !g.turn_state.token_played_this_turn
             && g.players
                 .first()
                 .is_some_and(|p| !p.shift_tokens.is_empty())
@@ -184,7 +182,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
     };
     match overlay {
         Overlay::QuitConfirm => {
-            let popup = centered_popup(area, 30, 5);
+            let popup = super::centered_popup(area, 30, 5);
             Clear.render(popup, buf);
             let block = Block::default()
                 .title(" Quit? ")
@@ -200,7 +198,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             buf.set_line(inner.x, inner.y + 1, &line, inner.width);
         }
         Overlay::DiscardChoice { drawn, current } => {
-            let popup = centered_popup(area, 46, 11);
+            let popup = super::centered_popup(area, 46, 11);
             Clear.render(popup, buf);
             let block = Block::default()
                 .title(" Keep or Discard? ")
@@ -275,11 +273,11 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 .map_or(Vec::new(), |p| {
                     p.shift_tokens
                         .iter()
-                        .map(|t| (token_name(t), token_description(t)))
+                        .map(|t| (t.to_string(), t.description().to_string()))
                         .collect()
                 });
             let h = (tokens.len() as u16 + 4).min(area.height);
-            let popup = centered_popup(area, 56, h);
+            let popup = super::centered_popup(area, 56, h);
             Clear.render(popup, buf);
             let block = Block::default()
                 .title(" ShiftTokens ")
@@ -330,7 +328,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                     .collect()
             });
             let h = (targets.len() as u16 + 4).min(area.height);
-            let popup = centered_popup(area, 36, h);
+            let popup = super::centered_popup(area, 36, h);
             Clear.render(popup, buf);
             let block = Block::default()
                 .title(format!(" Target — {:?} ", token))
@@ -359,9 +357,10 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             }
         }
         Overlay::ImpostorChoice {
-            die1, die2, rolling_tick, die1_locked, die2_locked, ..
+            dice: crate::app::DiceRollState { die1, die2, rolling_tick, die1_locked, die2_locked },
+            ..
         } | Overlay::PrimeSabaccChoice {
-            die1, die2, rolling_tick, die1_locked, die2_locked,
+            dice: crate::app::DiceRollState { die1, die2, rolling_tick, die1_locked, die2_locked },
         } => {
             let title = match overlay {
                 Overlay::ImpostorChoice { for_sand, has_blood_impostor, .. } => {
@@ -377,7 +376,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
                 }
                 _ => " Prime Sabacc — Choose a die ",
             };
-            let popup = centered_popup(area, 34, 9);
+            let popup = super::centered_popup(area, 34, 9);
             Clear.render(popup, buf);
             let block = Block::default()
                 .title(title)
@@ -469,7 +468,7 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
             chip_leader,
             ticks_remaining,
         } => {
-            let popup = centered_popup(area, 27, 8);
+            let popup = super::centered_popup(area, 27, 8);
             Clear.render(popup, buf);
             let block = Block::default()
                 .borders(Borders::ALL)
@@ -529,55 +528,4 @@ pub fn render_overlay(area: Rect, buf: &mut Buffer, app: &AppState) {
     }
 }
 
-/// Creates a centered rectangle within `area`.
-fn centered_popup(area: Rect, width: u16, height: u16) -> Rect {
-    let w = width.min(area.width);
-    let h = height.min(area.height);
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
-    Rect::new(x, y, w, h)
-}
 
-/// Returns a short human-readable name for a shift token.
-fn token_name(token: &ShiftToken) -> String {
-    match token {
-        ShiftToken::FreeDraw => "FreeDraw".into(),
-        ShiftToken::Refund => "Refund".into(),
-        ShiftToken::ExtraRefund => "ExtraRefund".into(),
-        ShiftToken::GeneralTariff => "GeneralTariff".into(),
-        ShiftToken::TargetTariff(_) => "TargetTariff".into(),
-        ShiftToken::Embargo => "Embargo".into(),
-        ShiftToken::Markdown => "Markdown".into(),
-        ShiftToken::Immunity => "Immunity".into(),
-        ShiftToken::GeneralAudit => "GeneralAudit".into(),
-        ShiftToken::TargetAudit(_) => "TargetAudit".into(),
-        ShiftToken::MajorFraud => "MajorFraud".into(),
-        ShiftToken::Embezzlement => "Embezzlement".into(),
-        ShiftToken::CookTheBooks => "CookTheBooks".into(),
-        ShiftToken::Exhaustion(_) => "Exhaustion".into(),
-        ShiftToken::DirectTransaction(_) => "DirectTransaction".into(),
-        ShiftToken::PrimeSabacc => "PrimeSabacc".into(),
-    }
-}
-
-/// Returns a short description for a shift token.
-fn token_description(token: &ShiftToken) -> String {
-    match token {
-        ShiftToken::FreeDraw => "Draw without paying 1 chip".into(),
-        ShiftToken::Refund => "Recover 2 invested chips".into(),
-        ShiftToken::ExtraRefund => "Recover 3 invested chips".into(),
-        ShiftToken::GeneralTariff => "All others pay 1 chip".into(),
-        ShiftToken::TargetTariff(_) => "Targeted player pays 2 chips".into(),
-        ShiftToken::Embargo => "Next player must Stand".into(),
-        ShiftToken::Markdown => "Sylop = 0 (no match)".into(),
-        ShiftToken::Immunity => "Immune to opponent tokens".into(),
-        ShiftToken::GeneralAudit => "Standing players pay 2 chips".into(),
-        ShiftToken::TargetAudit(_) => "Targeted standing pays 3 chips".into(),
-        ShiftToken::MajorFraud => "Impostor locked at 6".into(),
-        ShiftToken::Embezzlement => "Take 1 chip from each opponent".into(),
-        ShiftToken::CookTheBooks => "Reverse Sabacc ranking".into(),
-        ShiftToken::Exhaustion(_) => "Target redraws a new hand".into(),
-        ShiftToken::DirectTransaction(_) => "Swap hand with target".into(),
-        ShiftToken::PrimeSabacc => "Dice → value = best Sabacc".into(),
-    }
-}

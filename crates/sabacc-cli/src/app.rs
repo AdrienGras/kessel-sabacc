@@ -16,6 +16,9 @@ use crate::animation::{Animation, AnimationQueue, bot_highlight};
 use crate::events::AppEvent;
 use crate::widgets::starfield::Starfield;
 
+/// The human player is always the first player (id 0).
+const HUMAN_PLAYER_ID: PlayerId = 0;
+
 /// Number of ticks for the RoundAnnouncement auto-dismiss (~2s at 33ms/tick).
 pub const ROUND_ANNOUNCE_TOTAL_TICKS: u16 = 60;
 
@@ -35,6 +38,16 @@ pub struct LogEntry {
 
 // ── TUI State ────────────────────────────────────────────────────────
 
+/// Dice rolling animation state (shared between ImpostorChoice and PrimeSabaccChoice).
+#[derive(Debug, Clone)]
+pub struct DiceRollState {
+    pub die1: u8,
+    pub die2: u8,
+    pub rolling_tick: u16,
+    pub die1_locked: bool,
+    pub die2_locked: bool,
+}
+
 /// Which overlay is currently displayed on top of the main layout.
 #[derive(Debug, Clone)]
 pub enum Overlay {
@@ -47,21 +60,13 @@ pub enum Overlay {
         current: Card,
     },
     ImpostorChoice {
-        die1: u8,
-        die2: u8,
+        dice: DiceRollState,
         for_sand: bool,
         sand_choice: Option<u8>,
         has_blood_impostor: bool,
-        rolling_tick: u16,
-        die1_locked: bool,
-        die2_locked: bool,
     },
     PrimeSabaccChoice {
-        die1: u8,
-        die2: u8,
-        rolling_tick: u16,
-        die1_locked: bool,
-        die2_locked: bool,
+        dice: DiceRollState,
     },
     QuitConfirm,
     RoundResults {
@@ -162,8 +167,6 @@ pub struct TuiState {
     pub overlay: Option<Overlay>,
     /// True when the player is selecting a draw source directly on the table.
     pub source_picking: bool,
-    #[allow(dead_code)]
-    pub should_quit: bool,
     pub show_help: bool,
     pub terminal_width: u16,
     pub terminal_height: u16,
@@ -184,7 +187,6 @@ impl Default for TuiState {
             selected_die: 0,
             overlay: None,
             source_picking: false,
-            should_quit: false,
             show_help: false,
             terminal_width: 80,
             terminal_height: 24,
@@ -357,7 +359,6 @@ impl AppState {
     }
 
     /// Shortcut: create a quick-start state (skip setup).
-    #[allow(dead_code)]
     pub fn quick_start(name: String, num_bots: u8, buy_in: u32, tokens: bool) -> Self {
         let mut state = Self::new();
         state.setup.player_name = name;
@@ -391,10 +392,10 @@ impl AppState {
         }
         // Dice rolling animation
         if let Some(
-            Overlay::ImpostorChoice { die2_locked, .. } |
-            Overlay::PrimeSabaccChoice { die2_locked, .. }
+            Overlay::ImpostorChoice { dice, .. } |
+            Overlay::PrimeSabaccChoice { dice }
         ) = &self.tui.overlay {
-            if !*die2_locked {
+            if !dice.die2_locked {
                 return true;
             }
         }
@@ -492,16 +493,16 @@ pub fn update(mut state: AppState, event: AppEvent) -> (AppState, Command) {
 
             // Dice rolling animation tick
             if let Some(
-                Overlay::ImpostorChoice { rolling_tick, die1_locked, die2_locked, .. } |
-                Overlay::PrimeSabaccChoice { rolling_tick, die1_locked, die2_locked, .. }
+                Overlay::ImpostorChoice { dice, .. } |
+                Overlay::PrimeSabaccChoice { dice }
             ) = &mut state.tui.overlay {
-                if !*die2_locked {
-                    *rolling_tick += 1;
-                    if *rolling_tick >= DICE_ROLL_TICKS_DIE1 && !*die1_locked {
-                        *die1_locked = true;
+                if !dice.die2_locked {
+                    dice.rolling_tick += 1;
+                    if dice.rolling_tick >= DICE_ROLL_TICKS_DIE1 && !dice.die1_locked {
+                        dice.die1_locked = true;
                     }
-                    if *rolling_tick >= DICE_ROLL_TICKS_DIE2 {
-                        *die2_locked = true;
+                    if dice.rolling_tick >= DICE_ROLL_TICKS_DIE2 {
+                        dice.die2_locked = true;
                     }
                 }
             }
@@ -545,9 +546,9 @@ pub fn update(mut state: AppState, event: AppEvent) -> (AppState, Command) {
                     let needs_bots = match &g.phase {
                         GamePhase::TurnAction => !state.is_human_turn(),
                         GamePhase::ImpostorReveal { pending, .. } => {
-                            !pending.contains(&0u8) // human id = 0
+                            !pending.contains(&HUMAN_PLAYER_ID)
                         }
-                        GamePhase::PrimeSabaccChoice { player_id, .. } => *player_id != 0,
+                        GamePhase::PrimeSabaccChoice { player_id, .. } => *player_id != HUMAN_PLAYER_ID,
                         _ => false,
                     };
                     if needs_bots {
@@ -576,12 +577,12 @@ fn update_key(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
         }
         // Skip dice rolling animation
         if let Some(
-            Overlay::ImpostorChoice { die1_locked, die2_locked, .. } |
-            Overlay::PrimeSabaccChoice { die1_locked, die2_locked, .. }
+            Overlay::ImpostorChoice { dice, .. } |
+            Overlay::PrimeSabaccChoice { dice }
         ) = &mut state.tui.overlay {
-            if !*die2_locked {
-                *die1_locked = true;
-                *die2_locked = true;
+            if !dice.die2_locked {
+                dice.die1_locked = true;
+                dice.die2_locked = true;
             }
         }
         // Also skip RoundResults reveal animation
@@ -643,7 +644,6 @@ fn update_menu(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             match item {
                 MenuItem::HyperspaceSabacc => {
                     // Quick game: buy_in=100, chips=5, tokens ON, 3 shifts/player, 3 bots
-                    state.setup.player_name = state.setup.player_name.clone();
                     state.setup.num_bots = 3;
                     state.setup.buy_in_index = 1; // 100 credits
                     state.setup.tokens_enabled = true;
@@ -654,7 +654,6 @@ fn update_menu(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                 }
                 MenuItem::ClassicSabacc => {
                     // Quick game: buy_in=100, chips=5, tokens OFF, 3 bots
-                    state.setup.player_name = state.setup.player_name.clone();
                     state.setup.num_bots = 3;
                     state.setup.buy_in_index = 1; // 100 credits
                     state.setup.tokens_enabled = false;
@@ -664,7 +663,6 @@ fn update_menu(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                 }
                 MenuItem::LandosChallenge => {
                     // 1v1 expert: 1 bot ("Lando"), 100cr, tokens ON, 3/player, Expert
-                    state.setup.player_name = state.setup.player_name.clone();
                     state.setup.num_bots = 1;
                     state.setup.buy_in_index = 1; // 100 credits
                     state.setup.tokens_enabled = true;
@@ -902,8 +900,7 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             (state, Command::None)
         }
         GamePhase::ImpostorReveal { pending, .. } => {
-            let human_id = 0u8;
-            if pending.contains(&human_id) {
+            if pending.contains(&HUMAN_PLAYER_ID) {
                 // Human needs to submit impostor choice — open overlay
                 if let Some(hand) = state
                     .game
@@ -918,14 +915,16 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     let die1 = (state.rng.next_u64() % 6 + 1) as u8;
                     let die2 = (state.rng.next_u64() % 6 + 1) as u8;
                     state.tui.overlay = Some(Overlay::ImpostorChoice {
-                        die1,
-                        die2,
+                        dice: DiceRollState {
+                            die1,
+                            die2,
+                            rolling_tick: 0,
+                            die1_locked: false,
+                            die2_locked: false,
+                        },
                         for_sand: has_sand_impostor,
                         sand_choice: None,
                         has_blood_impostor,
-                        rolling_tick: 0,
-                        die1_locked: false,
-                        die2_locked: false,
                     });
                 }
                 (state, Command::None)
@@ -942,13 +941,15 @@ fn update_playing(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             let pid = *player_id;
             let d1 = *die1;
             let d2 = *die2;
-            if pid == 0 {
+            if pid == HUMAN_PLAYER_ID {
                 state.tui.overlay = Some(Overlay::PrimeSabaccChoice {
-                    die1: d1,
-                    die2: d2,
-                    rolling_tick: 0,
-                    die1_locked: false,
-                    die2_locked: false,
+                    dice: DiceRollState {
+                        die1: d1,
+                        die2: d2,
+                        rolling_tick: 0,
+                        die1_locked: false,
+                        die2_locked: false,
+                    },
                 });
                 (state, Command::None)
             } else {
@@ -989,7 +990,7 @@ fn update_source_picking(mut state: AppState, key: KeyEvent) -> (AppState, Comma
 fn update_turn_action(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
     let has_tokens = state.game.as_ref().is_some_and(|g| {
         g.config.enable_shift_tokens
-            && !g.token_played_this_turn
+            && !g.turn_state.token_played_this_turn
             && g.players
                 .first()
                 .is_some_and(|p| !p.shift_tokens.is_empty())
@@ -1033,7 +1034,7 @@ fn update_turn_action(mut state: AppState, key: KeyEvent) -> (AppState, Command)
                 state = apply_game_action(
                     state,
                     Action::PlayerAction {
-                        player_id: 0,
+                        player_id: HUMAN_PLAYER_ID,
                         action: TurnAction::Stand,
                     },
                 );
@@ -1072,347 +1073,364 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
 
     let overlay = state.tui.overlay.clone();
     match overlay {
-        Some(Overlay::QuitConfirm) => match key.code {
-            KeyCode::Char('y') | KeyCode::Enter => return (state, Command::Quit),
-            _ => {
-                state.tui.overlay = None;
+        Some(Overlay::QuitConfirm) => update_quit_confirm(state, key),
+        Some(Overlay::DiscardChoice { .. }) => update_discard_choice(state, key),
+        Some(Overlay::TokenPicker) => update_token_picker(state, key),
+        Some(Overlay::TargetPicker { ref token }) => {
+            let token = token.clone();
+            update_target_picker(state, key, &token)
+        }
+        Some(Overlay::ImpostorChoice { .. }) => update_impostor_choice(state, key),
+        Some(Overlay::PrimeSabaccChoice { .. }) => update_prime_sabacc_choice(state, key),
+        Some(Overlay::RoundResults { .. }) => update_round_results(state, key),
+        Some(Overlay::RoundAnnouncement { .. }) => update_round_announcement(state, key),
+        Some(Overlay::GameOverScreen { .. }) => update_game_over(state, key),
+        None => (state, Command::None),
+    }
+}
+
+fn update_quit_confirm(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Enter => (state, Command::Quit),
+        _ => {
+            state.tui.overlay = None;
+            (state, Command::None)
+        }
+    }
+}
+
+fn update_discard_choice(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    match key.code {
+        KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+            state.tui.selected_discard = 1 - state.tui.selected_discard;
+        }
+        KeyCode::Enter => {
+            let choice = if state.tui.selected_discard == 0 {
+                DiscardChoice::KeepDrawn
+            } else {
+                DiscardChoice::DiscardDrawn
+            };
+            state.tui.overlay = None;
+            state = apply_game_action(
+                state,
+                Action::ChooseDiscard {
+                    player_id: HUMAN_PLAYER_ID,
+                    choice,
+                },
+            );
+            if state.tui.selected_discard == 0 {
+                state.push_log("You: keep drawn".into());
+            } else {
+                state.push_log("You: discard drawn".into());
             }
-        },
-        Some(Overlay::DiscardChoice { .. }) => match key.code {
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                state.tui.selected_discard = 1 - state.tui.selected_discard;
+            if !state.is_human_turn() {
+                return (state, Command::RunBots);
             }
-            KeyCode::Enter => {
-                let choice = if state.tui.selected_discard == 0 {
-                    DiscardChoice::KeepDrawn
+        }
+        _ => {}
+    }
+    (state, Command::None)
+}
+
+fn update_token_picker(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    let token_count = state
+        .game
+        .as_ref()
+        .and_then(|g| g.players.first())
+        .map_or(0, |p| p.shift_tokens.len());
+
+    if token_count == 0 {
+        state.tui.overlay = None;
+        return (state, Command::None);
+    }
+
+    match key.code {
+        KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
+            state.tui.selected_token = (state.tui.selected_token + 1) % token_count;
+        }
+        KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
+            state.tui.selected_token =
+                (state.tui.selected_token + token_count - 1) % token_count;
+        }
+        KeyCode::Enter => {
+            let token = state
+                .game
+                .as_ref()
+                .and_then(|g| g.players.first())
+                .and_then(|p| p.shift_tokens.get(state.tui.selected_token))
+                .cloned();
+
+            if let Some(token) = token {
+                if token.requires_target() {
+                    state.tui.overlay = Some(Overlay::TargetPicker {
+                        token: token.clone(),
+                    });
+                    state.tui.selected_target = 0;
                 } else {
-                    DiscardChoice::DiscardDrawn
-                };
-                state.tui.overlay = None;
-                state = apply_game_action(
-                    state,
-                    Action::ChooseDiscard {
-                        player_id: 0,
-                        choice,
-                    },
-                );
-                if state.tui.selected_discard == 0 {
-                    state.push_log("You: keep drawn".into());
-                } else {
-                    state.push_log("You: discard drawn".into());
+                    state.tui.overlay = None;
+                    state.push_log(format!("You: {:?}", token));
+                    state = apply_game_action(
+                        state,
+                        Action::PlayShiftToken {
+                            player_id: HUMAN_PLAYER_ID,
+                            token,
+                        },
+                    );
+                    if !state.is_human_turn() {
+                        return (state, Command::RunBots);
+                    }
                 }
+            }
+        }
+        _ => {}
+    }
+    (state, Command::None)
+}
+
+fn update_target_picker(mut state: AppState, key: KeyEvent, token: &ShiftToken) -> (AppState, Command) {
+    let targets: Vec<PlayerId> = state.game.as_ref().map_or(Vec::new(), |g| {
+        g.players
+            .iter()
+            .filter(|p| p.id != HUMAN_PLAYER_ID && !p.is_eliminated)
+            .map(|p| p.id)
+            .collect()
+    });
+
+    if targets.is_empty() {
+        state.tui.overlay = None;
+        return (state, Command::None);
+    }
+
+    match key.code {
+        KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
+            state.tui.selected_target = (state.tui.selected_target + 1) % targets.len();
+        }
+        KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
+            state.tui.selected_target =
+                (state.tui.selected_target + targets.len() - 1) % targets.len();
+        }
+        KeyCode::Enter => {
+            let target_id = targets[state.tui.selected_target];
+            let targeted_token = apply_target_to_token(token, target_id);
+            let target_name = state
+                .game
+                .as_ref()
+                .and_then(|g| g.players.iter().find(|p| p.id == target_id))
+                .map_or("?".into(), |p| p.name.clone());
+
+            state.tui.overlay = None;
+            state.push_log(format!("You: {:?}→{}", token, target_name));
+            state = apply_game_action(
+                state,
+                Action::PlayShiftToken {
+                    player_id: HUMAN_PLAYER_ID,
+                    token: targeted_token,
+                },
+            );
+            if !state.is_human_turn() {
+                return (state, Command::RunBots);
+            }
+        }
+        _ => {}
+    }
+    (state, Command::None)
+}
+
+fn update_impostor_choice(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    let (die1, die2, for_sand, sand_choice, has_blood_impostor, die2_locked) =
+        match &state.tui.overlay {
+            Some(Overlay::ImpostorChoice {
+                dice: DiceRollState { die1, die2, die2_locked, .. },
+                for_sand,
+                sand_choice,
+                has_blood_impostor,
+            }) => (*die1, *die2, *for_sand, *sand_choice, *has_blood_impostor, *die2_locked),
+            _ => return (state, Command::None),
+        };
+
+    // Block all input while dice are rolling
+    if !die2_locked {
+        if key.code == KeyCode::Enter || key.code == KeyCode::Char(' ') {
+            if let Some(Overlay::ImpostorChoice { dice, .. }) = &mut state.tui.overlay {
+                dice.die1_locked = true;
+                dice.die2_locked = true;
+            }
+        }
+        return (state, Command::None);
+    }
+
+    match key.code {
+        KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+            state.tui.selected_die = 1 - state.tui.selected_die;
+        }
+        KeyCode::Enter => {
+            let chosen = if state.tui.selected_die == 0 { die1 } else { die2 };
+
+            if for_sand && has_blood_impostor {
+                state.tui.selected_die = 0;
+                let new_die1 = (state.rng.next_u64() % 6 + 1) as u8;
+                let new_die2 = (state.rng.next_u64() % 6 + 1) as u8;
+                state.push_log(format!("Sand Imp→{chosen}"));
+                state.tui.overlay = Some(Overlay::ImpostorChoice {
+                    dice: DiceRollState {
+                        die1: new_die1,
+                        die2: new_die2,
+                        rolling_tick: 0,
+                        die1_locked: false,
+                        die2_locked: false,
+                    },
+                    for_sand: false,
+                    sand_choice: Some(chosen),
+                    has_blood_impostor: true,
+                });
+            } else {
+                let final_sand = if for_sand { Some(chosen) } else { sand_choice };
+                let final_blood = if for_sand { None } else { Some(chosen) };
+
+                let choice = ImpostorChoice {
+                    player_id: HUMAN_PLAYER_ID,
+                    die1,
+                    die2,
+                    sand_choice: final_sand,
+                    blood_choice: final_blood,
+                };
+
+                state.impostor_choices.push(choice.clone());
+                state.tui.overlay = None;
+                state.tui.selected_die = 0;
+                let label = if has_blood_impostor { "Blood Imp" } else { "Impostor" };
+                state.push_log(format!("{label}→{chosen}"));
+                state = apply_game_action(state, Action::SubmitImpostorChoice(choice));
                 if !state.is_human_turn() {
                     return (state, Command::RunBots);
                 }
             }
-            _ => {}
-        },
-        Some(Overlay::TokenPicker) => {
-            let token_count = state
-                .game
-                .as_ref()
-                .and_then(|g| g.players.first())
-                .map_or(0, |p| p.shift_tokens.len());
+        }
+        _ => {}
+    }
+    (state, Command::None)
+}
 
-            if token_count == 0 {
-                state.tui.overlay = None;
-                return (state, Command::None);
-            }
+fn update_prime_sabacc_choice(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    let (die1, die2, die2_locked) = match &state.tui.overlay {
+        Some(Overlay::PrimeSabaccChoice {
+            dice: DiceRollState { die1, die2, die2_locked, .. },
+        }) => (*die1, *die2, *die2_locked),
+        _ => return (state, Command::None),
+    };
 
-            match key.code {
-                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
-                    state.tui.selected_token = (state.tui.selected_token + 1) % token_count;
-                }
-                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
-                    state.tui.selected_token =
-                        (state.tui.selected_token + token_count - 1) % token_count;
-                }
-                KeyCode::Enter => {
-                    let token = state
-                        .game
-                        .as_ref()
-                        .and_then(|g| g.players.first())
-                        .and_then(|p| p.shift_tokens.get(state.tui.selected_token))
-                        .cloned();
-
-                    if let Some(token) = token {
-                        if token.requires_target() {
-                            state.tui.overlay = Some(Overlay::TargetPicker {
-                                token: token.clone(),
-                            });
-                            state.tui.selected_target = 0;
-                        } else {
-                            state.tui.overlay = None;
-                            state.push_log(format!("You: {:?}", token));
-                            state = apply_game_action(
-                                state,
-                                Action::PlayShiftToken {
-                                    player_id: 0,
-                                    token,
-                                },
-                            );
-                            if !state.is_human_turn() {
-                                return (state, Command::RunBots);
-                            }
-                        }
-                    }
-                }
-                _ => {}
+    if !die2_locked {
+        if key.code == KeyCode::Enter || key.code == KeyCode::Char(' ') {
+            if let Some(Overlay::PrimeSabaccChoice { dice }) = &mut state.tui.overlay {
+                dice.die1_locked = true;
+                dice.die2_locked = true;
             }
         }
-        Some(Overlay::TargetPicker { ref token }) => {
-            let targets: Vec<PlayerId> = state.game.as_ref().map_or(Vec::new(), |g| {
-                g.players
-                    .iter()
-                    .filter(|p| p.id != 0 && !p.is_eliminated)
-                    .map(|p| p.id)
-                    .collect()
-            });
+        return (state, Command::None);
+    }
 
-            if targets.is_empty() {
-                state.tui.overlay = None;
-                return (state, Command::None);
-            }
-
-            let token = token.clone();
-            match key.code {
-                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
-                    state.tui.selected_target = (state.tui.selected_target + 1) % targets.len();
-                }
-                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
-                    state.tui.selected_target =
-                        (state.tui.selected_target + targets.len() - 1) % targets.len();
-                }
-                KeyCode::Enter => {
-                    let target_id = targets[state.tui.selected_target];
-                    let targeted_token = apply_target_to_token(&token, target_id);
-                    let target_name = state
-                        .game
-                        .as_ref()
-                        .and_then(|g| g.players.iter().find(|p| p.id == target_id))
-                        .map_or("?".into(), |p| p.name.clone());
-
-                    state.tui.overlay = None;
-                    state.push_log(format!("You: {:?}→{}", token, target_name));
-                    state = apply_game_action(
-                        state,
-                        Action::PlayShiftToken {
-                            player_id: 0,
-                            token: targeted_token,
-                        },
-                    );
-                    if !state.is_human_turn() {
-                        return (state, Command::RunBots);
-                    }
-                }
-                _ => {}
+    match key.code {
+        KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+            state.tui.selected_die = 1 - state.tui.selected_die;
+        }
+        KeyCode::Enter => {
+            let chosen = if state.tui.selected_die == 0 { die1 } else { die2 };
+            state.tui.overlay = None;
+            state.tui.selected_die = 0;
+            state.push_log(format!("PrimeSabacc→{chosen}"));
+            state = apply_game_action(
+                state,
+                Action::SubmitPrimeSabaccChoice {
+                    player_id: HUMAN_PLAYER_ID,
+                    chosen_value: chosen,
+                },
+            );
+            if !state.is_human_turn() {
+                return (state, Command::RunBots);
             }
         }
-        Some(Overlay::ImpostorChoice {
-            die1,
-            die2,
-            for_sand,
-            sand_choice,
-            has_blood_impostor,
-            die2_locked,
-            ..
-        }) => {
-            // Block all input while dice are rolling (Space skip handled above)
-            if !die2_locked {
-                // Enter also skips the animation
-                if key.code == KeyCode::Enter || key.code == KeyCode::Char(' ') {
-                    if let Some(
-                        Overlay::ImpostorChoice { die1_locked, die2_locked, .. }
-                    ) = &mut state.tui.overlay {
-                        *die1_locked = true;
-                        *die2_locked = true;
-                    }
-                }
-                return (state, Command::None);
-            }
-            match key.code {
-                KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                    state.tui.selected_die = 1 - state.tui.selected_die;
-                }
-                KeyCode::Enter => {
-                    let chosen = if state.tui.selected_die == 0 {
-                        die1
-                    } else {
-                        die2
-                    };
+        _ => {}
+    }
+    (state, Command::None)
+}
 
-                    if for_sand && has_blood_impostor {
-                        // Double impostor: Sand chosen, now need Blood choice
-                        state.tui.selected_die = 0;
-                        let new_die1 = (state.rng.next_u64() % 6 + 1) as u8;
-                        let new_die2 = (state.rng.next_u64() % 6 + 1) as u8;
-                        state.push_log(format!("Sand Imp→{chosen}"));
-                        state.tui.overlay = Some(Overlay::ImpostorChoice {
-                            die1: new_die1,
-                            die2: new_die2,
-                            for_sand: false,
-                            sand_choice: Some(chosen),
-                            has_blood_impostor: true,
-                            rolling_tick: 0,
-                            die1_locked: false,
-                            die2_locked: false,
-                        });
-                    } else {
-                        // Single impostor or Blood step of double impostor
-                        let final_sand = if for_sand { Some(chosen) } else { sand_choice };
-                        let final_blood = if for_sand { None } else { Some(chosen) };
-
-                        let choice = ImpostorChoice {
-                            player_id: 0,
-                            die1,
-                            die2,
-                            sand_choice: final_sand,
-                            blood_choice: final_blood,
-                        };
-
-                        state.impostor_choices.push(choice.clone());
-                        state.tui.overlay = None;
-                        state.tui.selected_die = 0;
-                        let label = if has_blood_impostor { "Blood Imp" } else { "Impostor" };
-                        state.push_log(format!("{label}→{chosen}"));
-                        state =
-                            apply_game_action(state, Action::SubmitImpostorChoice(choice));
-                        if !state.is_human_turn() {
-                            return (state, Command::RunBots);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        Some(Overlay::PrimeSabaccChoice { die1, die2, die2_locked, .. }) => {
-            // Block all input while dice are rolling
-            if !die2_locked {
-                if key.code == KeyCode::Enter || key.code == KeyCode::Char(' ') {
-                    if let Some(
-                        Overlay::PrimeSabaccChoice { die1_locked, die2_locked, .. }
-                    ) = &mut state.tui.overlay {
-                        *die1_locked = true;
-                        *die2_locked = true;
-                    }
-                }
-                return (state, Command::None);
-            }
-            match key.code {
-                KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                    state.tui.selected_die = 1 - state.tui.selected_die;
-                }
-                KeyCode::Enter => {
-                    let chosen = if state.tui.selected_die == 0 {
-                        die1
-                    } else {
-                        die2
-                    };
-                    state.tui.overlay = None;
-                    state.tui.selected_die = 0;
-                    state.push_log(format!("PrimeSabacc→{chosen}"));
-                    state = apply_game_action(
-                        state,
-                        Action::SubmitPrimeSabaccChoice {
-                            player_id: 0,
-                            chosen_value: chosen,
-                        },
-                    );
-                    if !state.is_human_turn() {
-                        return (state, Command::RunBots);
-                    }
-                }
-                _ => {}
-            }
-        }
+fn update_round_results(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    let (revealed, total, scroll) = match &state.tui.overlay {
         Some(Overlay::RoundResults {
             revealed_count,
             total_players,
             scroll_offset,
             ..
-        }) => {
-            let revealed = revealed_count;
-            let total = total_players;
-            let scroll = scroll_offset;
-            match key.code {
-                KeyCode::Char(' ') => {
-                    // Skip animation — reveal all
-                    if let Some(Overlay::RoundResults {
-                        revealed_count, ..
-                    }) = &mut state.tui.overlay
-                    {
-                        *revealed_count = total;
-                    }
-                }
-                KeyCode::Enter if revealed >= total => {
-                    // Close overlay and advance round (Reveal → RoundEnd)
-                    state.tui.overlay = None;
-                    state = apply_game_action(state, Action::AdvanceRound);
+        }) => (*revealed_count, *total_players, *scroll_offset),
+        _ => return (state, Command::None),
+    };
 
-                    // If only 1 player left, skip RoundAnnouncement → go straight to GameOver
-                    let only_one_left = state
-                        .game
-                        .as_ref()
-                        .is_some_and(|g| g.players.iter().filter(|p| !p.is_eliminated).count() <= 1);
-                    if only_one_left {
-                        // Apply 2nd AdvanceRound (RoundEnd → GameOver)
-                        state = apply_game_action(state, Action::AdvanceRound);
-                        return (state, Command::None);
-                    }
-
-                    // If GameOver → the overlay was already set by check_phase_transitions
-                    if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
-                        return (state, Command::None);
-                    }
-
-                    // Otherwise → show RoundAnnouncement overlay
-                    let (round, remaining, leader) = build_round_summary(&state);
-                    state.tui.overlay = Some(Overlay::RoundAnnouncement {
-                        round,
-                        players_remaining: remaining,
-                        chip_leader: leader,
-                        ticks_remaining: ROUND_ANNOUNCE_TOTAL_TICKS,
-                    });
-                }
-                KeyCode::Up | KeyCode::PageUp => {
-                    if let Some(Overlay::RoundResults {
-                        scroll_offset, ..
-                    }) = &mut state.tui.overlay
-                    {
-                        *scroll_offset = scroll.saturating_sub(2);
-                    }
-                }
-                KeyCode::Down | KeyCode::PageDown => {
-                    if let Some(Overlay::RoundResults {
-                        scroll_offset, ..
-                    }) = &mut state.tui.overlay
-                    {
-                        *scroll_offset = scroll + 2;
-                    }
-                }
-                _ => {}
+    match key.code {
+        KeyCode::Char(' ') => {
+            if let Some(Overlay::RoundResults { revealed_count, .. }) = &mut state.tui.overlay {
+                *revealed_count = total;
             }
         }
-        Some(Overlay::RoundAnnouncement { .. }) => match key.code {
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                state.tui.overlay = None;
-                return dismiss_round_announcement(state);
-            }
-            _ => {}
-        },
-        Some(Overlay::GameOverScreen { .. }) => match key.code {
-            KeyCode::Enter => {
-                let mut new_state = AppState::new();
-                new_state.setup = state.setup.clone();
-                return (new_state, Command::None);
-            }
-            KeyCode::Char('q') => return (state, Command::Quit),
-            _ => {}
-        },
-        None => {}
-    }
+        KeyCode::Enter if revealed >= total => {
+            state.tui.overlay = None;
+            state = apply_game_action(state, Action::AdvanceRound);
 
+            let only_one_left = state
+                .game
+                .as_ref()
+                .is_some_and(|g| g.players.iter().filter(|p| !p.is_eliminated).count() <= 1);
+            if only_one_left {
+                state = apply_game_action(state, Action::AdvanceRound);
+                return (state, Command::None);
+            }
+
+            if matches!(&state.tui.overlay, Some(Overlay::GameOverScreen { .. })) {
+                return (state, Command::None);
+            }
+
+            let (round, remaining, leader) = build_round_summary(&state);
+            state.tui.overlay = Some(Overlay::RoundAnnouncement {
+                round,
+                players_remaining: remaining,
+                chip_leader: leader,
+                ticks_remaining: ROUND_ANNOUNCE_TOTAL_TICKS,
+            });
+        }
+        KeyCode::Up | KeyCode::PageUp => {
+            if let Some(Overlay::RoundResults { scroll_offset, .. }) = &mut state.tui.overlay {
+                *scroll_offset = scroll.saturating_sub(2);
+            }
+        }
+        KeyCode::Down | KeyCode::PageDown => {
+            if let Some(Overlay::RoundResults { scroll_offset, .. }) = &mut state.tui.overlay {
+                *scroll_offset = scroll + 2;
+            }
+        }
+        _ => {}
+    }
     (state, Command::None)
+}
+
+fn update_round_announcement(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
+    match key.code {
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            state.tui.overlay = None;
+            dismiss_round_announcement(state)
+        }
+        _ => (state, Command::None),
+    }
+}
+
+fn update_game_over(state: AppState, key: KeyEvent) -> (AppState, Command) {
+    match key.code {
+        KeyCode::Enter => {
+            let mut new_state = AppState::new();
+            new_state.setup = state.setup.clone();
+            (new_state, Command::None)
+        }
+        KeyCode::Char('q') => (state, Command::Quit),
+        _ => (state, Command::None),
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -1426,19 +1444,13 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
         DrawSource::BloodDiscard,
     ];
     let source = sources[state.tui.selected_source];
-    let source_name = match source {
-        DrawSource::SandDeck => "Deck S",
-        DrawSource::BloodDeck => "Deck B",
-        DrawSource::SandDiscard => "Dis S",
-        DrawSource::BloodDiscard => "Dis B",
-    };
 
     state.tui.overlay = None;
-    state.push_log(format!("You: Draw {source_name}"));
+    state.push_log(format!("You: Draw {source}"));
     state = apply_game_action(
         state,
         Action::PlayerAction {
-            player_id: 0,
+            player_id: HUMAN_PLAYER_ID,
             action: TurnAction::Draw(source),
         },
     );
@@ -1475,19 +1487,15 @@ fn confirm_source_pick(mut state: AppState) -> AppState {
 
 fn apply_game_action(mut state: AppState, action: Action) -> AppState {
     if let Some(game_state) = state.game.take() {
+        let backup = game_state.clone();
         match game::apply_action(game_state, action, &mut state.rng) {
             Ok(new_game) => {
-                // Check for phase transitions
                 check_phase_transitions(&mut state, &new_game);
                 state.game = Some(new_game);
             }
             Err(e) => {
                 state.push_error(format!("Error: {e}"));
-                // Restore game state on error — re-create from error
-                // The game state was consumed, but we can't recover it.
-                // This is a design limitation — we should clone before.
-                // For now, log the error. The game is lost on error.
-                state.push_error("Game state lost due to error.".into());
+                state.game = Some(backup);
             }
         }
     }
@@ -1541,7 +1549,7 @@ fn check_phase_transitions(state: &mut AppState, game: &GameState) {
             for result in results {
                 let player = game.players.iter().find(|p| p.id == result.player_id);
                 let name = player.map_or("?".into(), |p| p.name.clone());
-                let rank_str = short_rank(&result.rank);
+                let rank_str = result.rank.to_string();
 
                 // chips_before = reserve chips only (what the player sees in their stack)
                 let chips_before = player.map_or(0, |p| p.chips);
@@ -1749,7 +1757,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 let bot_id = player.id;
 
                 // Bot may play a token first
-                if game_state.config.enable_shift_tokens && !game_state.token_played_this_turn {
+                if game_state.config.enable_shift_tokens && !game_state.turn_state.token_played_this_turn {
                     if let Some(token_action) = bot.choose_token(&game_state, &mut state.rng) {
                         let token_desc = describe_action(&token_action, &game_state);
                         match game::apply_action(game_state, token_action, &mut state.rng) {
@@ -1925,15 +1933,7 @@ fn describe_action(action: &Action, _game: &GameState) -> String {
             action: turn_action,
             ..
         } => match turn_action {
-            TurnAction::Draw(source) => {
-                let source_name = match source {
-                    DrawSource::SandDeck => "Deck S",
-                    DrawSource::BloodDeck => "Deck B",
-                    DrawSource::SandDiscard => "Dis S",
-                    DrawSource::BloodDiscard => "Dis B",
-                };
-                format!("Draw {source_name}")
-            }
+            TurnAction::Draw(source) => format!("Draw {source}"),
             TurnAction::Stand => "Stand".into(),
         },
         Action::PlayShiftToken { token, .. } => format!("{:?}", token),
@@ -1941,10 +1941,6 @@ fn describe_action(action: &Action, _game: &GameState) -> String {
     }
 }
 
-/// Short display for HandRank (fits ~23 chars in log).
-fn short_rank(rank: &sabacc_core::hand::HandRank) -> String {
-    rank.to_string()
-}
 
 #[cfg(test)]
 mod tests {

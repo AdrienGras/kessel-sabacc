@@ -29,7 +29,11 @@ pub struct Card {
 
 impl Card {
     /// Create a new numbered card.
+    ///
+    /// # Panics
+    /// Panics if `n` is not in range 1..=6.
     pub fn number(family: Family, n: u8) -> Self {
+        assert!((1..=6).contains(&n), "card value must be 1-6, got {n}");
         Self {
             family,
             value: CardValue::Number(n),

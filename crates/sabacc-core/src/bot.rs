@@ -86,7 +86,7 @@ impl BotStrategy for BasicBot {
         let pid = player.id;
 
         // Evaluate current hand quality
-        let draw_chance = if let Some(ref hand) = player.hand {
+        let draw_threshold = if let Some(ref hand) = player.hand {
             let sand_val = card_numeric_value(&hand.sand.value);
             let blood_val = card_numeric_value(&hand.blood.value);
             let diff = sand_val.abs_diff(blood_val);
@@ -98,8 +98,8 @@ impl BotStrategy for BasicBot {
             50
         };
 
-        let can_draw_free = state.free_draw_active;
-        if !can_draw_free && (player.chips == 0 || rng.gen_range(0..100) >= draw_chance) {
+        let can_draw_free = state.turn_state.free_draw_active;
+        if !can_draw_free && (player.chips == 0 || rng.gen_range(0..100) >= draw_threshold) {
             Action::PlayerAction {
                 player_id: pid,
                 action: TurnAction::Stand,
@@ -180,52 +180,7 @@ impl BotStrategy for BasicBot {
     }
 
     fn choose_impostor(&self, state: &GameState, rng: &mut impl Rng) -> Action {
-        let (pending, _) = match &state.phase {
-            GamePhase::ImpostorReveal {
-                pending,
-                submitted,
-            } => (pending, submitted),
-            _ => panic!("choose_impostor called in wrong phase"),
-        };
-
-        let pid = pending[0];
-        let player = state.players.iter().find(|p| p.id == pid);
-
-        let die1 = rng.gen_range(1..=6u8);
-        let die2 = rng.gen_range(1..=6u8);
-
-        let (sand_choice, blood_choice) = if let Some(player) = player {
-            if let Some(ref hand) = player.hand {
-                let sc = if hand.sand.value == CardValue::Impostor {
-                    // Choose the die value closest to the blood card
-                    let blood_val = card_numeric_value(&hand.blood.value);
-                    Some(pick_closest(die1, die2, blood_val))
-                } else {
-                    None
-                };
-
-                let bc = if hand.blood.value == CardValue::Impostor {
-                    let sand_val = card_numeric_value(&hand.sand.value);
-                    Some(pick_closest(die1, die2, sand_val))
-                } else {
-                    None
-                };
-
-                (sc, bc)
-            } else {
-                (Some(die1), Some(die1))
-            }
-        } else {
-            (Some(die1), Some(die1))
-        };
-
-        Action::SubmitImpostorChoice(ImpostorChoice {
-            player_id: pid,
-            die1,
-            die2,
-            sand_choice,
-            blood_choice,
-        })
+        default_impostor_choice(state, rng)
     }
 
     fn choose_token(&self, state: &GameState, rng: &mut impl Rng) -> Option<Action> {
@@ -326,35 +281,7 @@ impl BotStrategy for BasicBot {
     }
 
     fn choose_prime_sabacc(&self, state: &GameState, _rng: &mut impl Rng) -> Action {
-        let (player_id, die1, die2) = match &state.phase {
-            GamePhase::PrimeSabaccChoice {
-                player_id,
-                die1,
-                die2,
-            } => (*player_id, *die1, *die2),
-            _ => panic!("choose_prime_sabacc called in wrong phase"),
-        };
-
-        // Pick the die value closest to the other card in hand
-        let player = state.players.iter().find(|p| p.id == player_id);
-        let chosen = if let Some(player) = player {
-            if let Some(ref hand) = player.hand {
-                let sand_val = card_numeric_value(&hand.sand.value);
-                let blood_val = card_numeric_value(&hand.blood.value);
-                // Pick value closest to either card
-                let target = sand_val.min(blood_val);
-                pick_closest(die1, die2, target)
-            } else {
-                die1.min(die2)
-            }
-        } else {
-            die1.min(die2)
-        };
-
-        Action::SubmitPrimeSabaccChoice {
-            player_id,
-            chosen_value: chosen,
-        }
+        default_prime_sabacc_choice(state)
     }
 }
 
@@ -395,7 +322,7 @@ impl BotStrategy for ExpertBot {
         }
 
         // Can't draw without chips (and no FreeDraw)
-        if chips == 0 && !state.free_draw_active {
+        if chips == 0 && !state.turn_state.free_draw_active {
             return stand_action(pid);
         }
 
@@ -437,51 +364,7 @@ impl BotStrategy for ExpertBot {
     }
 
     fn choose_impostor(&self, state: &GameState, rng: &mut impl Rng) -> Action {
-        let (pending, _) = match &state.phase {
-            GamePhase::ImpostorReveal {
-                pending,
-                submitted,
-            } => (pending, submitted),
-            _ => panic!("choose_impostor called in wrong phase"),
-        };
-
-        let pid = pending[0];
-        let player = state.players.iter().find(|p| p.id == pid);
-
-        let die1 = rng.gen_range(1..=6u8);
-        let die2 = rng.gen_range(1..=6u8);
-
-        let (sand_choice, blood_choice) = if let Some(player) = player {
-            if let Some(ref hand) = player.hand {
-                let sc = if hand.sand.value == CardValue::Impostor {
-                    let other_val = card_numeric_value(&hand.blood.value);
-                    Some(expert_pick_impostor(die1, die2, other_val))
-                } else {
-                    None
-                };
-
-                let bc = if hand.blood.value == CardValue::Impostor {
-                    let other_val = card_numeric_value(&hand.sand.value);
-                    Some(expert_pick_impostor(die1, die2, other_val))
-                } else {
-                    None
-                };
-
-                (sc, bc)
-            } else {
-                (Some(die1), Some(die1))
-            }
-        } else {
-            (Some(die1), Some(die1))
-        };
-
-        Action::SubmitImpostorChoice(ImpostorChoice {
-            player_id: pid,
-            die1,
-            die2,
-            sand_choice,
-            blood_choice,
-        })
+        default_impostor_choice(state, rng)
     }
 
     fn choose_token(&self, state: &GameState, _rng: &mut impl Rng) -> Option<Action> {
@@ -616,34 +499,7 @@ impl BotStrategy for ExpertBot {
     }
 
     fn choose_prime_sabacc(&self, state: &GameState, _rng: &mut impl Rng) -> Action {
-        let (player_id, die1, die2) = match &state.phase {
-            GamePhase::PrimeSabaccChoice {
-                player_id,
-                die1,
-                die2,
-            } => (*player_id, *die1, *die2),
-            _ => panic!("choose_prime_sabacc called in wrong phase"),
-        };
-
-        // Pick die value closest to the minimum card value (lower PrimeSabacc ranks better)
-        let player = state.players.iter().find(|p| p.id == player_id);
-        let chosen = if let Some(player) = player {
-            if let Some(ref hand) = player.hand {
-                let sand_val = card_numeric_value(&hand.sand.value);
-                let blood_val = card_numeric_value(&hand.blood.value);
-                let target = sand_val.min(blood_val);
-                pick_closest(die1, die2, target)
-            } else {
-                die1.min(die2)
-            }
-        } else {
-            die1.min(die2)
-        };
-
-        Action::SubmitPrimeSabaccChoice {
-            player_id,
-            chosen_value: chosen,
-        }
+        default_prime_sabacc_choice(state)
     }
 }
 
@@ -710,6 +566,86 @@ impl ExpertBot {
     }
 }
 
+/// Default impostor choice: pick die closest to the other card's value.
+fn default_impostor_choice(state: &GameState, rng: &mut impl Rng) -> Action {
+    let (pending, _) = match &state.phase {
+        GamePhase::ImpostorReveal {
+            pending,
+            submitted,
+        } => (pending, submitted),
+        _ => panic!("choose_impostor called in wrong phase"),
+    };
+
+    let pid = pending[0];
+    let player = state.players.iter().find(|p| p.id == pid);
+
+    let die1 = rng.gen_range(1..=6u8);
+    let die2 = rng.gen_range(1..=6u8);
+
+    let (sand_choice, blood_choice) = if let Some(player) = player {
+        if let Some(ref hand) = player.hand {
+            let sc = if hand.sand.value == CardValue::Impostor {
+                let blood_val = card_numeric_value(&hand.blood.value);
+                Some(pick_closest(die1, die2, blood_val))
+            } else {
+                None
+            };
+
+            let bc = if hand.blood.value == CardValue::Impostor {
+                let sand_val = card_numeric_value(&hand.sand.value);
+                Some(pick_closest(die1, die2, sand_val))
+            } else {
+                None
+            };
+
+            (sc, bc)
+        } else {
+            (Some(die1), Some(die1))
+        }
+    } else {
+        (Some(die1), Some(die1))
+    };
+
+    Action::SubmitImpostorChoice(ImpostorChoice {
+        player_id: pid,
+        die1,
+        die2,
+        sand_choice,
+        blood_choice,
+    })
+}
+
+/// Default PrimeSabacc choice: pick die closest to the minimum card value.
+fn default_prime_sabacc_choice(state: &GameState) -> Action {
+    let (player_id, die1, die2) = match &state.phase {
+        GamePhase::PrimeSabaccChoice {
+            player_id,
+            die1,
+            die2,
+        } => (*player_id, *die1, *die2),
+        _ => panic!("choose_prime_sabacc called in wrong phase"),
+    };
+
+    let player = state.players.iter().find(|p| p.id == player_id);
+    let chosen = if let Some(player) = player {
+        if let Some(ref hand) = player.hand {
+            let sand_val = card_numeric_value(&hand.sand.value);
+            let blood_val = card_numeric_value(&hand.blood.value);
+            let target = sand_val.min(blood_val);
+            pick_closest(die1, die2, target)
+        } else {
+            die1.min(die2)
+        }
+    } else {
+        die1.min(die2)
+    };
+
+    Action::SubmitPrimeSabaccChoice {
+        player_id,
+        chosen_value: chosen,
+    }
+}
+
 /// Build a Stand action for the given player.
 fn stand_action(pid: PlayerId) -> Action {
     Action::PlayerAction {
@@ -718,13 +654,6 @@ fn stand_action(pid: PlayerId) -> Action {
     }
 }
 
-/// Expert impostor die selection: bias by other card's value.
-fn expert_pick_impostor(die1: u8, die2: u8, other_val: u8) -> u8 {
-    // Always prefer the die closest to the other card's value
-    // For low other values (≤ 2), this naturally tries to match
-    // For high other values (≥ 5), this also tries to match but both are risky
-    pick_closest(die1, die2, other_val)
-}
 
 /// Get the chip count of the next non-eliminated player after the current one.
 fn next_player_chips(state: &GameState, self_id: PlayerId) -> Option<u8> {
