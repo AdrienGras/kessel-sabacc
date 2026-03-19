@@ -1301,7 +1301,7 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             let total = total_players;
             let scroll = scroll_offset;
             match key.code {
-                KeyCode::Char(' ') => {
+                KeyCode::Char(' ') if revealed < total => {
                     // Skip animation — reveal all
                     if let Some(Overlay::RoundResults {
                         revealed_count, ..
@@ -1310,7 +1310,9 @@ fn update_overlay(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                         *revealed_count = total;
                     }
                 }
-                KeyCode::Enter if revealed >= total => {
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    // Skip reveal if still animating, then dismiss
+                    // (single Enter always dismisses)
                     // Close overlay and advance round (Reveal → RoundEnd)
                     state.tui.overlay = None;
                     state = apply_game_action(state, Action::AdvanceRound);
@@ -1720,12 +1722,34 @@ pub fn run_bots(mut state: AppState) -> AppState {
                 if game_state.config.enable_shift_tokens && !game_state.token_played_this_turn {
                     if let Some(token_action) = bot.choose_token(&game_state, &mut state.rng) {
                         let token_desc = describe_action(&token_action, &game_state);
+                        // Snapshot chips before token to detect changes
+                        let chips_before: Vec<(PlayerId, u8)> = game_state
+                            .players
+                            .iter()
+                            .map(|p| (p.id, p.chips))
+                            .collect();
                         match game::apply_action(game_state, token_action, &mut state.rng) {
                             Ok(new_state) => {
                                 state.animations.push(Animation::LogMessage {
                                     text: format!("{bot_name}: {token_desc}"),
                                 });
                                 state.animations.push(bot_highlight(bot_id, 150));
+                                // Push ChipChange for all affected players
+                                for (pid, old_chips) in &chips_before {
+                                    let new_chips = new_state
+                                        .players
+                                        .iter()
+                                        .find(|p| p.id == *pid)
+                                        .map_or(0, |p| p.chips);
+                                    let delta = new_chips as i8 - *old_chips as i8;
+                                    if delta != 0 {
+                                        state.animations.push(Animation::ChipChange {
+                                            player_id: *pid,
+                                            delta,
+                                            duration_ms: 400,
+                                        });
+                                    }
+                                }
                                 state.game = Some(new_state);
                                 continue; // Loop back — bot still needs Draw/Stand
                             }
