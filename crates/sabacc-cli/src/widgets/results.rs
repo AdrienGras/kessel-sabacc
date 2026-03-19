@@ -245,7 +245,7 @@ pub fn render_game_over(area: Rect, buf: &mut Buffer, overlay: &Overlay) {
     };
 
     let content_h = (standings.len() as u16 + 14).max(16);
-    let popup_w = area.width.saturating_sub(4); // full width minus margin
+    let popup_w = (area.width.saturating_sub(4)).min(90);
     let popup_h = (area.height.saturating_sub(2)).min(content_h + 4);
     let popup = centered_popup(area, popup_w, popup_h);
     Clear.render(popup, buf);
