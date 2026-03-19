@@ -1,7 +1,7 @@
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 
-use sabacc_core::bot::BasicBot;
+use sabacc_core::bot::{BasicBot, BotDifficulty};
 use sabacc_core::game::{self, Action, GameConfig, GamePhase};
 use sabacc_core::turn::TurnAction;
 
@@ -18,6 +18,7 @@ fn full_game_terminates_with_seed_42() {
         buy_in: 100,
         enable_shift_tokens: false,
         token_distribution: sabacc_core::game::TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -155,6 +156,7 @@ fn chip_conservation_across_rounds() {
         buy_in: 100,
         enable_shift_tokens: false,
         token_distribution: sabacc_core::game::TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let initial_total_chips = 6u16 * 3;
@@ -217,6 +219,7 @@ fn elimination_order_tracks_eliminated_players() {
         buy_in: 50,
         enable_shift_tokens: false,
         token_distribution: sabacc_core::game::TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -295,6 +298,7 @@ fn four_player_game_terminates() {
         buy_in: 50,
         enable_shift_tokens: false,
         token_distribution: sabacc_core::game::TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();

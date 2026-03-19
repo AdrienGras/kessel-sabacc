@@ -5,6 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
+use sabacc_core::bot::BotDifficulty;
+
 use crate::app::{AppState, MenuItem, Screen, SetupState};
 use crate::widgets;
 use crate::widgets::starfield::StarfieldWidget;
@@ -463,9 +465,9 @@ fn render_how_to_play(frame: &mut Frame, app: &AppState) {
 fn render_setup(frame: &mut Frame, app: &AppState) {
     let inner = render_chrome(frame, app);
 
-    // Center the form box (max 50 wide, 16 tall)
+    // Center the form box (max 50 wide, 18 tall)
     let form_w = 50u16.min(inner.width.saturating_sub(4));
-    let form_h = 16u16.min(inner.height.saturating_sub(2));
+    let form_h = 18u16.min(inner.height.saturating_sub(2));
     let form_x = inner.x + (inner.width.saturating_sub(form_w)) / 2;
     let form_y = inner.y + (inner.height.saturating_sub(form_h)) / 2;
     let form_area = Rect::new(form_x, form_y, form_w, form_h);
@@ -520,6 +522,14 @@ fn render_setup_form(frame: &mut Frame, area: Rect, setup: &SetupState) {
     } else {
         fields.push(("Tokens per player", "—".into()));
     }
+
+    fields.push((
+        "Difficulty",
+        match setup.difficulty {
+            BotDifficulty::Basic => "◀ Basic ▶".into(),
+            BotDifficulty::Expert => "◀ Expert ▶".into(),
+        },
+    ));
 
     // Render form fields
     for (i, (label, value)) in fields.iter().enumerate() {

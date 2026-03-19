@@ -1,6 +1,7 @@
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 
+use sabacc_core::bot::BotDifficulty;
 use sabacc_core::card::{Card, Family};
 use sabacc_core::game::{self, Action, GameConfig, GamePhase, TokenDistribution};
 use sabacc_core::hand::Hand;
@@ -25,6 +26,7 @@ pub fn started_game(
         buy_in: 100,
         enable_shift_tokens: false,
         token_distribution: TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -50,6 +52,7 @@ pub fn game_with_tokens(
         buy_in: 100,
         enable_shift_tokens: true,
         token_distribution: TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();

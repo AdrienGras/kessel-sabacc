@@ -3,6 +3,7 @@ mod common;
 use common::*;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
+use sabacc_core::bot::BotDifficulty;
 use sabacc_core::game::{self, Action, GameConfig, GamePhase, TokenDistribution};
 use sabacc_core::shift_token::ShiftToken;
 use sabacc_core::turn::TurnAction;
@@ -62,6 +63,7 @@ fn stats_chips_history_grows_with_rounds() {
         buy_in: 100,
         enable_shift_tokens: false,
         token_distribution: TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
     let state = game::new_game(config, &mut rng).unwrap();
     let mut state = game::apply_action(state, Action::StartGame, &mut rng).unwrap();

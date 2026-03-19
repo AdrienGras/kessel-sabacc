@@ -1,5 +1,6 @@
 use rand::Rng;
 
+use crate::bot::BotDifficulty;
 use crate::card::{Card, Family};
 use crate::deck::FamilyDeck;
 use crate::error::GameError;
@@ -46,6 +47,8 @@ pub struct GameConfig {
     pub enable_shift_tokens: bool,
     /// How tokens are distributed.
     pub token_distribution: TokenDistribution,
+    /// Bot difficulty level.
+    pub bot_difficulty: BotDifficulty,
 }
 
 impl Default for GameConfig {
@@ -59,6 +62,7 @@ impl Default for GameConfig {
             buy_in: 100,
             enable_shift_tokens: false,
             token_distribution: TokenDistribution::None,
+            bot_difficulty: BotDifficulty::Basic,
         }
     }
 }
@@ -1182,6 +1186,7 @@ mod tests {
             buy_in: 100,
             enable_shift_tokens: false,
             token_distribution: TokenDistribution::None,
+            bot_difficulty: BotDifficulty::Basic,
         }
     }
 

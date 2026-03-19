@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 
-use sabacc_core::bot::BasicBot;
+use sabacc_core::bot::BotDifficulty;
 use sabacc_core::card::Card;
 use sabacc_core::game::{self, Action, GameConfig, GamePhase, GameState, TokenDistribution};
 use sabacc_core::player::Player;
@@ -203,6 +203,7 @@ pub struct SetupState {
     pub buy_in_index: usize,
     pub tokens_enabled: bool,
     pub tokens_per_player: u8,
+    pub difficulty: BotDifficulty,
     pub selected_field: usize,
 }
 
@@ -214,6 +215,7 @@ impl Default for SetupState {
             buy_in_index: 1, // 100 credits
             tokens_enabled: true,
             tokens_per_player: 4,
+            difficulty: BotDifficulty::Basic,
             selected_field: 0,
         }
     }
@@ -222,7 +224,7 @@ impl Default for SetupState {
 impl SetupState {
     pub const BUY_IN_OPTIONS: [u32; 4] = [50, 100, 150, 200];
     pub const CHIPS_OPTIONS: [u8; 4] = [4, 5, 6, 8];
-    pub const NUM_FIELDS: usize = 6; // name, bots, buy_in, tokens, tokens_count, start
+    pub const NUM_FIELDS: usize = 7; // name, bots, buy_in, tokens, tokens_count, difficulty, start
 
     pub fn buy_in(&self) -> u32 {
         Self::BUY_IN_OPTIONS[self.buy_in_index]
@@ -249,15 +251,17 @@ pub enum Screen {
 pub enum MenuItem {
     HyperspaceSabacc,
     ClassicSabacc,
+    LandosChallenge,
     CustomGame,
     HowToPlay,
     Quit,
 }
 
 impl MenuItem {
-    pub const ALL: [MenuItem; 5] = [
+    pub const ALL: [MenuItem; 6] = [
         MenuItem::HyperspaceSabacc,
         MenuItem::ClassicSabacc,
+        MenuItem::LandosChallenge,
         MenuItem::CustomGame,
         MenuItem::HowToPlay,
         MenuItem::Quit,
@@ -268,6 +272,7 @@ impl MenuItem {
         match self {
             Self::HyperspaceSabacc => "Hyperspace Sabacc",
             Self::ClassicSabacc => "Classic Sabacc",
+            Self::LandosChallenge => "Lando's Challenge",
             Self::CustomGame => "Custom Game",
             Self::HowToPlay => "How to Play",
             Self::Quit => "Quit",
@@ -282,6 +287,9 @@ impl MenuItem {
             }
             Self::ClassicSabacc => {
                 "Pure cards, no tricks. The way Han {stole} won the Falcon from Lando.\n3 opponents, 100 credits. Just you and the deck."
+            }
+            Self::LandosChallenge => {
+                "Face the galaxy's smoothest smuggler in a 1v1 duel.\n100 credits, tokens ON. Expert difficulty."
             }
             Self::CustomGame => {
                 "Set up your own table in the back of the cantina.\nPick your opponents, stakes, and house rules."
@@ -640,6 +648,7 @@ fn update_menu(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     state.setup.buy_in_index = 1; // 100 credits
                     state.setup.tokens_enabled = true;
                     state.setup.tokens_per_player = 3;
+                    state.setup.difficulty = BotDifficulty::Basic;
                     state = start_game(state);
                     return (state, Command::RunBots);
                 }
@@ -649,6 +658,18 @@ fn update_menu(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                     state.setup.num_bots = 3;
                     state.setup.buy_in_index = 1; // 100 credits
                     state.setup.tokens_enabled = false;
+                    state.setup.difficulty = BotDifficulty::Basic;
+                    state = start_game(state);
+                    return (state, Command::RunBots);
+                }
+                MenuItem::LandosChallenge => {
+                    // 1v1 expert: 1 bot ("Lando"), 100cr, tokens ON, 3/player, Expert
+                    state.setup.player_name = state.setup.player_name.clone();
+                    state.setup.num_bots = 1;
+                    state.setup.buy_in_index = 1; // 100 credits
+                    state.setup.tokens_enabled = true;
+                    state.setup.tokens_per_player = 3;
+                    state.setup.difficulty = BotDifficulty::Expert;
                     state = start_game(state);
                     return (state, Command::RunBots);
                 }
@@ -726,6 +747,12 @@ fn update_setup(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
                 state.setup.tokens_per_player =
                     state.setup.tokens_per_player.saturating_sub(1).max(1);
             }
+            5 => {
+                state.setup.difficulty = match state.setup.difficulty {
+                    BotDifficulty::Expert => BotDifficulty::Basic,
+                    BotDifficulty::Basic => BotDifficulty::Expert,
+                };
+            }
             _ => {}
         },
         KeyCode::Right => match field {
@@ -737,6 +764,12 @@ fn update_setup(mut state: AppState, key: KeyEvent) -> (AppState, Command) {
             3 => state.setup.tokens_enabled = !state.setup.tokens_enabled,
             4 if state.setup.tokens_enabled => {
                 state.setup.tokens_per_player = (state.setup.tokens_per_player + 1).min(8);
+            }
+            5 => {
+                state.setup.difficulty = match state.setup.difficulty {
+                    BotDifficulty::Basic => BotDifficulty::Expert,
+                    BotDifficulty::Expert => BotDifficulty::Basic,
+                };
             }
             _ => {}
         },
@@ -781,6 +814,7 @@ fn start_game(mut state: AppState) -> AppState {
         } else {
             TokenDistribution::None
         },
+        bot_difficulty: state.setup.difficulty.clone(),
     };
 
     match game::new_game(config, &mut state.rng) {
@@ -1691,7 +1725,11 @@ fn apply_target_to_token(token: &ShiftToken, target: PlayerId) -> ShiftToken {
 /// Loops until it's the human's turn, a non-bot phase, or an error.
 pub fn run_bots(mut state: AppState) -> AppState {
     use sabacc_core::bot::BotStrategy;
-    let bot = BasicBot;
+    let bot = state
+        .game
+        .as_ref()
+        .map(|g| g.config.bot_difficulty.clone())
+        .unwrap_or(BotDifficulty::Basic);
 
     loop {
         let game_state = match state.game.take() {
@@ -1852,7 +1890,7 @@ pub fn run_bots(mut state: AppState) -> AppState {
 }
 
 /// Handles the ChoosingDiscard phase for a bot after a Draw.
-fn advance_bot_discard(bot: &BasicBot, mut state: AppState, bot_name: &str) -> AppState {
+fn advance_bot_discard(bot: &BotDifficulty, mut state: AppState, bot_name: &str) -> AppState {
     use sabacc_core::bot::BotStrategy;
 
     if let Some(game_state) = state.game.take() {

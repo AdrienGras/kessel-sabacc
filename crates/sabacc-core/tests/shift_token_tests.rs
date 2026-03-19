@@ -1,6 +1,7 @@
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 
+use sabacc_core::bot::BotDifficulty;
 use sabacc_core::card::{Card, CardValue, Family};
 use sabacc_core::game::{self, Action, GameConfig, GamePhase, TokenDistribution};
 use sabacc_core::hand::Hand;
@@ -21,6 +22,7 @@ fn setup_game_with_tokens(
         buy_in: 100,
         enable_shift_tokens: true,
         token_distribution: TokenDistribution::None, // We'll set tokens manually
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -49,6 +51,7 @@ fn setup_3p_game_with_tokens(
         buy_in: 100,
         enable_shift_tokens: true,
         token_distribution: TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -1016,6 +1019,7 @@ fn full_game_with_tokens_terminates() {
         token_distribution: TokenDistribution::Random {
             tokens_per_player: 4,
         },
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -1064,6 +1068,7 @@ fn three_player_game_with_tokens_terminates() {
         token_distribution: TokenDistribution::Random {
             tokens_per_player: 4,
         },
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -1109,6 +1114,7 @@ fn four_player_game_with_tokens_terminates() {
         token_distribution: TokenDistribution::Random {
             tokens_per_player: 3,
         },
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -1146,6 +1152,7 @@ fn token_distribution_fixed() {
         buy_in: 100,
         enable_shift_tokens: true,
         token_distribution: TokenDistribution::Fixed(fixed_tokens.clone()),
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
@@ -1164,6 +1171,7 @@ fn token_distribution_none() {
         buy_in: 100,
         enable_shift_tokens: false,
         token_distribution: TokenDistribution::None,
+        bot_difficulty: BotDifficulty::Basic,
     };
 
     let state = game::new_game(config, &mut rng).unwrap();
