@@ -12,7 +12,7 @@ Librairies à résoudre systématiquement selon le crate concerné :
 - `sabacc-core` → aucune dépendance externe, pas de consultation nécessaire
 - `sabacc-cli` → résoudre `ratatui` et `crossterm`
 - `sabacc-wasm` → résoudre `wasm-bindgen` et `wasm-pack`
-- `web/` → résoudre `svelte` et `vite`
+- `web/` → résoudre `react`, `react-router`, `vite`, `zustand`, `tailwindcss`
 
 Exemple de workflow attendu :
 1. Appel Context7 `resolve-library-id` pour chaque librairie concernée
@@ -27,7 +27,7 @@ Reproduction jouable du **Sabacc de Kessel** (variante du jeu Star Wars Outlaws)
 sous forme d'un workspace Rust multi-crates avec deux frontends :
 
 - **TUI** via Ratatui (terminal)
-- **Web** via Svelte + Vite (WebAssembly)
+- **Web** via React + Vite + 8bitcn (WebAssembly)
 
 Le cœur du jeu est isolé dans un crate Rust pur sans aucune dépendance UI.
 
@@ -64,20 +64,29 @@ kessel-sabacc/
 │       ├── Cargo.toml       # dépend de sabacc-core, wasm-bindgen
 │       └── src/
 │           └── lib.rs       # fonctions exportées vers JS
-└── web/                     # frontend Svelte
-    ├── package.json
-    ├── vite.config.js
+└── web/                     # frontend React + 8bitcn
+    ├── .nvmrc               # Node LTS version (22)
+    ├── package.json          # pnpm, scripts build:wasm/dev/build
+    ├── vite.config.ts
+    ├── tsconfig.json
+    ├── components.json       # shadcn + 8bitcn registry
     ├── src/
-    │   ├── App.svelte
+    │   ├── main.tsx
+    │   ├── App.tsx           # HashRouter + Routes
+    │   ├── globals.css       # Tailwind v4 + 8-bit theme
     │   ├── lib/
-    │   │   ├── wasm.js      # initialisation et import du module wasm
-    │   │   └── stores.js    # stores Svelte (gameStore, playerStore, etc.)
-    │   └── components/
-    │       ├── Card.svelte  # composant SVG paramétrique
-    │       ├── Hand.svelte
-    │       ├── Board.svelte
-    │       ├── ShiftToken.svelte
-    │       └── Dice.svelte
+    │   │   ├── wasm.ts       # chargement async du module WASM
+    │   │   ├── game-store.ts # store zustand (état de jeu)
+    │   │   └── utils.ts      # cn() helper (tailwind-merge)
+    │   ├── components/
+    │   │   ├── Layout.tsx    # layout partagé + starfield + WASM preload
+    │   │   ├── Starfield.tsx # animation canvas 2D (port du TUI)
+    │   │   └── ui/           # composants shadcn + 8bitcn
+    │   └── pages/
+    │       ├── MainMenu.tsx  # menu ASCII art + items
+    │       ├── HowToPlay.tsx # règles scrollables
+    │       ├── Setup.tsx     # formulaire config
+    │       └── Game.tsx      # WASM + placeholder board
     └── public/
 ```
 
@@ -241,7 +250,11 @@ pub enum ShiftToken {
 - `clippy` sans warnings — `#[allow(...)]` uniquement si justifié
 - Pas de `unwrap()` ni `expect()` en production — propager les erreurs
 - Tout type public : doc-comment `///`
-- Nommage : snake_case Rust, camelCase JS/Svelte, PascalCase composants Svelte
+- Nommage : snake_case Rust, camelCase TS/JS, PascalCase composants React
+- Package manager : **pnpm** uniquement (pas npm, pas yarn)
+- Node version : via **nvm** — toujours `nvm use` avant toute commande dans `web/`
+- Pas de `any` en TypeScript sauf nécessité justifiée
+- Préférer les function components avec hooks
 - Commits en anglais, gitmoji + conventionnel : `✨ feat:`, `🐛 fix:`, etc.
 
 ---

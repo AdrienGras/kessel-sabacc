@@ -13,3 +13,8 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Web
+web/node_modules/
+web/dist/
+web/src/wasm-pkg/
