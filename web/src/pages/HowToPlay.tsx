@@ -1,6 +1,11 @@
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ColorButton } from "@/components/ColorButton";
 import { Card, CardContent } from "@/components/ui/8bit/card";
+import { DecryptHeader } from "@/components/DecryptHeader";
+import { DecryptSection } from "@/components/DecryptSection";
+import { useDecryptEngine } from "@/hooks/useDecryptEngine";
+import { useGameStore } from "@/lib/game-store";
 
 const SECTIONS = [
   {
@@ -74,34 +79,119 @@ Rule-changers: Markdown, MajorFraud, CookTheBooks, DirectTransaction, PrimeSabac
   },
 ];
 
-export default function HowToPlay() {
+function HowToPlayContent({ remountKey }: { remountKey: number }) {
   const navigate = useNavigate();
+  const howToPlayDecrypted = useGameStore((s) => s.howToPlayDecrypted);
+  const setHowToPlayDecrypted = useGameStore((s) => s.setHowToPlayDecrypted);
+  const resetHowToPlayDecrypted = useGameStore(
+    (s) => s.resetHowToPlayDecrypted,
+  );
+
+  const handleComplete = useCallback(() => {
+    setHowToPlayDecrypted();
+  }, [setHowToPlayDecrypted]);
+
+  const { phase, progress, sectionStates, scrambleChars, skip } =
+    useDecryptEngine({
+      sections: SECTIONS,
+      alreadyDecrypted: howToPlayDecrypted,
+      onComplete: handleComplete,
+    });
+
+  const isAnimating = phase !== "complete";
+
+  // Scroll lock during animation
+  useEffect(() => {
+    if (isAnimating) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isAnimating]);
+
+  // Global skip: Space/Esc/click
+  useEffect(() => {
+    if (!isAnimating) return;
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === " " || e.key === "Escape") {
+        e.preventDefault();
+        skip();
+      }
+    };
+    const handleClick = () => skip();
+
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("click", handleClick);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("click", handleClick);
+    };
+  }, [isAnimating, skip]);
+
+  const handleReplay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.scrollTo({ top: 0 });
+    resetHowToPlayDecrypted();
+  };
+
+  // Use remountKey to suppress lint warning — it forces a fresh hook instance
+  void remountKey;
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-8">
-      <h1 className="text-center text-sand">How to Play</h1>
+    <div className="relative mx-auto flex max-w-2xl flex-col gap-4 px-4 py-8" aria-live="polite">
+      <DecryptHeader phase={phase} progress={progress} />
+
+      {/* Scanline CRT overlay */}
+      {isAnimating && <div className="scanline-overlay" aria-hidden="true" />}
 
       <Card className="border-sand dark:border-sand">
         <CardContent className="flex flex-col gap-6 pt-6">
-          {SECTIONS.map((section) => (
-            <div key={section.title}>
-              <h3 className="mb-2 text-[11px] font-bold text-sand">
-                {section.title}
-              </h3>
-              <p className="text-[9px] leading-relaxed whitespace-pre-line text-gray-300">
-                {section.content}
-              </p>
-            </div>
+          {SECTIONS.map((section, idx) => (
+            <DecryptSection
+              key={section.title}
+              title={section.title}
+              content={section.content}
+              titleStates={sectionStates[idx]?.title ?? []}
+              contentStates={sectionStates[idx]?.content ?? []}
+              scrambleChars={scrambleChars}
+              sectionIdx={idx}
+            />
           ))}
         </CardContent>
       </Card>
 
-      <ColorButton
-        className="mx-auto mt-4 w-48"
-        onClick={() => navigate("/")}
-      >
-        Back to Menu
-      </ColorButton>
+      <div className="mx-auto mt-4 flex gap-4">
+        <ColorButton className="w-48" onClick={() => navigate("/")}>
+          Back to Menu
+        </ColorButton>
+
+        {!isAnimating && (
+          <ColorButton
+            className="w-48 opacity-50 hover:opacity-100"
+            onClick={handleReplay}
+          >
+            Replay Decrypt
+          </ColorButton>
+        )}
+      </div>
     </div>
   );
+}
+
+export default function HowToPlay() {
+  const [remountKey, setRemountKey] = useState(0);
+  const howToPlayDecrypted = useGameStore((s) => s.howToPlayDecrypted);
+
+  // When howToPlayDecrypted resets to false, force remount
+  useEffect(() => {
+    if (!howToPlayDecrypted) {
+      setRemountKey((k) => k + 1);
+    }
+  }, [howToPlayDecrypted]);
+
+  return <HowToPlayContent key={remountKey} remountKey={remountKey} />;
 }
