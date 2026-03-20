@@ -65,7 +65,7 @@ export default function Setup() {
       {/* Buy-in */}
       <div className="flex w-full flex-col gap-1">
         <label className="text-[9px] text-gray-400">Buy-in (credits)</label>
-        <Select value={buyIn} onValueChange={setBuyIn}>
+        <Select value={buyIn} onValueChange={(v) => setBuyIn(String(v))}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
@@ -103,7 +103,7 @@ export default function Setup() {
       {/* Difficulty */}
       <div className="flex w-full flex-col gap-1">
         <label className="text-[9px] text-gray-400">Bot Difficulty</label>
-        <Select value={difficulty} onValueChange={setDifficulty}>
+        <Select value={difficulty} onValueChange={(v) => setDifficulty(String(v))}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
