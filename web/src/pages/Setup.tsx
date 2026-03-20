@@ -121,7 +121,7 @@ export default function Setup() {
 
       <ColorButton
         className="w-48 text-[9px]"
-        onClick={() => navigate("/")}
+        onClick={() => navigate("/menu")}
       >
         Back to Menu
       </ColorButton>

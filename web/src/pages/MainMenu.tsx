@@ -51,6 +51,12 @@ export default function MainMenu() {
         "Every smuggler starts somewhere.\nLearn the cards, the bets, and how not to lose your ship.",
       action: () => navigate("/how-to-play"),
     },
+    {
+      label: "Credits",
+      description:
+        "The beings behind the Sabacc table.\nDesign, code, music, and a love letter to the galaxy.",
+      action: () => navigate("/credits"),
+    },
   ];
 
   return (
@@ -98,6 +104,15 @@ export default function MainMenu() {
           </ColorButton>
         ))}
       </div>
+
+      {/* Replay Intro */}
+      <button
+        onClick={() => navigate("/")}
+        className="fixed right-4 bottom-4 cursor-pointer text-[8px] text-gray-600 transition-colors hover:text-sand"
+        style={{ fontFamily: "var(--font-pixel)" }}
+      >
+        Replay Intro
+      </button>
     </div>
   );
 }

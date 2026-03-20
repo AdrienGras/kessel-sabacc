@@ -27,7 +27,7 @@ export default function Game() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4">
         <p className="text-blood">WASM Error: {error}</p>
-        <ColorButton onClick={() => navigate("/")}>
+        <ColorButton onClick={() => navigate("/menu")}>
           Back to Menu
         </ColorButton>
       </div>
@@ -55,7 +55,7 @@ export default function Game() {
         Game board coming soon...
       </p>
 
-      <ColorButton onClick={() => navigate("/")}>
+      <ColorButton onClick={() => navigate("/menu")}>
         Back to Menu
       </ColorButton>
     </div>

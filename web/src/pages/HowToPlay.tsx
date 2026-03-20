@@ -165,7 +165,7 @@ function HowToPlayContent({ remountKey }: { remountKey: number }) {
       </Card>
 
       <div className="mx-auto mt-4 flex gap-4">
-        <ColorButton className="w-48" onClick={() => navigate("/")}>
+        <ColorButton className="w-48" onClick={() => navigate("/menu")}>
           Back to Menu
         </ColorButton>
 
