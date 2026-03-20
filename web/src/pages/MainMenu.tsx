@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/8bit/button";
+import { ColorButton } from "@/components/ColorButton";
 
 const TITLE_ART = [
   " ███████  █████  ██████   █████   ██████  ██████",
@@ -85,17 +85,17 @@ export default function MainMenu() {
       </div>
 
       {/* Menu items */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-4">
         {menuItems.map((item, i) => (
-          <Button
+          <ColorButton
             key={item.label}
-            variant={hovered === i ? "default" : "outline"}
+            active={hovered === i}
             className="w-64 text-[9px]"
             onMouseEnter={() => setHovered(i)}
             onClick={item.action}
           >
             {item.label}
-          </Button>
+          </ColorButton>
         ))}
       </div>
     </div>

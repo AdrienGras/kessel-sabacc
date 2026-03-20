@@ -1,11 +1,6 @@
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/8bit/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/8bit/card";
+import { ColorButton } from "@/components/ColorButton";
+import { Card, CardContent } from "@/components/ui/8bit/card";
 
 const SECTIONS = [
   {
@@ -86,28 +81,27 @@ export default function HowToPlay() {
     <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-8">
       <h1 className="text-center text-sand">How to Play</h1>
 
-      {SECTIONS.map((section) => (
-        <Card key={section.title}>
-          <CardHeader>
-            <CardTitle className="text-[11px] text-sand">
-              {section.title}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-[9px] leading-relaxed whitespace-pre-line text-gray-300">
-              {section.content}
-            </p>
-          </CardContent>
-        </Card>
-      ))}
+      <Card className="border-sand dark:border-sand">
+        <CardContent className="flex flex-col gap-6 pt-6">
+          {SECTIONS.map((section) => (
+            <div key={section.title}>
+              <h3 className="mb-2 text-[11px] font-bold text-sand">
+                {section.title}
+              </h3>
+              <p className="text-[9px] leading-relaxed whitespace-pre-line text-gray-300">
+                {section.content}
+              </p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
-      <Button
-        variant="outline"
+      <ColorButton
         className="mx-auto mt-4 w-48"
         onClick={() => navigate("/")}
       >
         Back to Menu
-      </Button>
+      </ColorButton>
     </div>
   );
 }

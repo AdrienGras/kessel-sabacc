@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/8bit/button";
+import { ColorButton } from "@/components/ColorButton";
 import { Badge } from "@/components/ui/8bit/badge";
 import { initWasm } from "@/lib/wasm";
 import { useGameStore } from "@/lib/game-store";
@@ -27,9 +27,9 @@ export default function Game() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4">
         <p className="text-blood">WASM Error: {error}</p>
-        <Button variant="outline" onClick={() => navigate("/")}>
+        <ColorButton onClick={() => navigate("/")}>
           Back to Menu
-        </Button>
+        </ColorButton>
       </div>
     );
   }
@@ -55,9 +55,9 @@ export default function Game() {
         Game board coming soon...
       </p>
 
-      <Button variant="outline" onClick={() => navigate("/")}>
+      <ColorButton onClick={() => navigate("/")}>
         Back to Menu
-      </Button>
+      </ColorButton>
     </div>
   );
 }

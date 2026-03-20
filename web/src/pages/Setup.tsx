@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/8bit/button";
+import { ColorButton } from "@/components/ColorButton";
 import { Input } from "@/components/ui/8bit/input";
 import {
   Select,
@@ -115,17 +115,16 @@ export default function Setup() {
       </div>
 
       {/* Start */}
-      <Button className="mt-4 w-full" onClick={handleStart}>
+      <ColorButton className="mt-4 w-full" onClick={handleStart}>
         START GAME
-      </Button>
+      </ColorButton>
 
-      <Button
-        variant="outline"
+      <ColorButton
         className="w-48 text-[9px]"
         onClick={() => navigate("/")}
       >
         Back to Menu
-      </Button>
+      </ColorButton>
     </div>
   );
 }
