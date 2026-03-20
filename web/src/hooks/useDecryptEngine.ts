@@ -33,13 +33,6 @@ export interface DecryptEngineResult {
   skip: () => void;
 }
 
-interface Cluster {
-  sectionIdx: number;
-  field: "title" | "content";
-  charIndices: number[];
-  triggerTime: number;
-}
-
 interface CharTransition {
   key: string;
   sectionIdx: number;
@@ -53,14 +46,8 @@ interface CharTransition {
 
 const AUREBESH_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const AUREBESH_HOLD_MS = 800;
-const TITLE_DECODE_START = 200;
-const TITLE_DECODE_END = 800;
-const BODY_SLOW_START = 800;
-const BODY_SLOW_END = 2300;
-const BODY_MEDIUM_START = 2300;
-const BODY_MEDIUM_END = 3800;
-const BODY_FAST_START = 3800;
-const BODY_FAST_END = 5300;
+const CHAR_DELAY_START = 4;
+const CHAR_DELAY_END = 1;
 const SCRAMBLE_DURATION = 50;
 const FLASH_DURATION = 50;
 const GLOW_FADE_DURATION = 300;
@@ -70,131 +57,54 @@ function randomAurebeshChar(): string {
   return AUREBESH_CHARS[Math.floor(Math.random() * AUREBESH_CHARS.length)];
 }
 
-function shuffleArray<T>(arr: T[]): T[] {
-  const shuffled = [...arr];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
-
 function isAnimatable(char: string): boolean {
   return char.trim().length > 0 && /[a-zA-Z0-9]/.test(char);
 }
 
-function buildClusters(sections: Section[]): Cluster[] {
-  const clusters: Cluster[] = [];
-
-  for (let sIdx = 0; sIdx < sections.length; sIdx++) {
-    const section = sections[sIdx];
-
-    // Title clusters: 3-4 chars, between TITLE_DECODE_START and TITLE_DECODE_END
-    const titleIndices = shuffleArray(
-      [...section.title]
-        .map((ch, i) => ({ ch, i }))
-        .filter(({ ch }) => isAnimatable(ch))
-        .map(({ i }) => i),
-    );
-    const titleClusterSize = Math.min(4, Math.max(3, Math.ceil(titleIndices.length / 3)));
-    for (let i = 0; i < titleIndices.length; i += titleClusterSize) {
-      const chunk = titleIndices.slice(i, i + titleClusterSize);
-      const t =
-        TITLE_DECODE_START +
-        (i / titleIndices.length) * (TITLE_DECODE_END - TITLE_DECODE_START);
-      clusters.push({
-        sectionIdx: sIdx,
-        field: "title",
-        charIndices: chunk,
-        triggerTime: t,
-      });
-    }
-
-    // Content clusters: distributed across slow/medium/fast phases
-    const contentIndices = shuffleArray(
-      [...section.content]
-        .map((ch, i) => ({ ch, i }))
-        .filter(({ ch }) => isAnimatable(ch))
-        .map(({ i }) => i),
-    );
-
-    const total = contentIndices.length;
-    const slowCount = Math.floor(total * 0.2);
-    const mediumCount = Math.floor(total * 0.3);
-
-    // Slow phase: 2-4 chars per cluster
-    let offset = 0;
-    const slowIndices = contentIndices.slice(offset, offset + slowCount);
-    offset += slowCount;
-    for (let i = 0; i < slowIndices.length; i += 3) {
-      const chunk = slowIndices.slice(i, i + Math.min(4, 2 + Math.floor(Math.random() * 3)));
-      const t =
-        BODY_SLOW_START +
-        (i / Math.max(1, slowIndices.length)) * (BODY_SLOW_END - BODY_SLOW_START);
-      clusters.push({
-        sectionIdx: sIdx,
-        field: "content",
-        charIndices: chunk,
-        triggerTime: t,
-      });
-    }
-
-    // Medium phase: 4-8 chars per cluster
-    const mediumIndices = contentIndices.slice(offset, offset + mediumCount);
-    offset += mediumCount;
-    for (let i = 0; i < mediumIndices.length; i += 6) {
-      const chunk = mediumIndices.slice(i, i + Math.min(8, 4 + Math.floor(Math.random() * 5)));
-      const t =
-        BODY_MEDIUM_START +
-        (i / Math.max(1, mediumIndices.length)) * (BODY_MEDIUM_END - BODY_MEDIUM_START);
-      clusters.push({
-        sectionIdx: sIdx,
-        field: "content",
-        charIndices: chunk,
-        triggerTime: t,
-      });
-    }
-
-    // Fast phase: 10-20 chars per cluster
-    const fastIndices = contentIndices.slice(offset);
-    for (let i = 0; i < fastIndices.length; i += 15) {
-      const chunk = fastIndices.slice(i, i + Math.min(20, 10 + Math.floor(Math.random() * 11)));
-      const t =
-        BODY_FAST_START +
-        (i / Math.max(1, fastIndices.length)) * (BODY_FAST_END - BODY_FAST_START);
-      clusters.push({
-        sectionIdx: sIdx,
-        field: "content",
-        charIndices: chunk,
-        triggerTime: t,
-      });
-    }
-  }
-
-  return clusters.sort((a, b) => a.triggerTime - b.triggerTime);
-}
-
-function buildTransitions(clusters: Cluster[]): CharTransition[] {
+function buildSequentialTransitions(sections: Section[]): CharTransition[] {
   const transitions: CharTransition[] = [];
 
-  for (const cluster of clusters) {
-    for (const charIdx of cluster.charIndices) {
-      const key = `${cluster.sectionIdx}-${cluster.field}-${charIdx}`;
+  // Count total animatable chars for delay interpolation
+  let totalAnimatable = 0;
+  for (const section of sections) {
+    for (const ch of section.title) if (isAnimatable(ch)) totalAnimatable++;
+    for (const ch of section.content) if (isAnimatable(ch)) totalAnimatable++;
+  }
+
+  let animatedCount = 0;
+  let currentTime = 0;
+
+  const addCharsFromText = (
+    text: string,
+    sectionIdx: number,
+    field: "title" | "content",
+  ) => {
+    for (let charIdx = 0; charIdx < text.length; charIdx++) {
+      if (!isAnimatable(text[charIdx])) continue;
+
+      const progress = totalAnimatable > 1 ? animatedCount / (totalAnimatable - 1) : 0;
+      const delay = CHAR_DELAY_START + progress * (CHAR_DELAY_END - CHAR_DELAY_START);
+
+      const key = `${sectionIdx}-${field}-${charIdx}`;
       transitions.push({
         key,
-        sectionIdx: cluster.sectionIdx,
-        field: cluster.field,
+        sectionIdx,
+        field,
         charIdx,
-        scrambleStart: cluster.triggerTime,
-        flashStart: cluster.triggerTime + SCRAMBLE_DURATION,
-        decodedStart: cluster.triggerTime + SCRAMBLE_DURATION + FLASH_DURATION,
-        glowEnd:
-          cluster.triggerTime +
-          SCRAMBLE_DURATION +
-          FLASH_DURATION +
-          GLOW_FADE_DURATION,
+        scrambleStart: currentTime,
+        flashStart: currentTime + SCRAMBLE_DURATION,
+        decodedStart: currentTime + SCRAMBLE_DURATION + FLASH_DURATION,
+        glowEnd: currentTime + SCRAMBLE_DURATION + FLASH_DURATION + GLOW_FADE_DURATION,
       });
+
+      currentTime += delay;
+      animatedCount++;
     }
+  };
+
+  for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+    addCharsFromText(sections[sIdx].title, sIdx, "title");
+    addCharsFromText(sections[sIdx].content, sIdx, "content");
   }
 
   return transitions;
@@ -278,14 +188,13 @@ export function useDecryptEngine({
       // Phase 1: Aurebesh hold
       setPhase("aurebesh");
 
-      const clusters = buildClusters(sections);
-      const transitions = buildTransitions(clusters);
+      const transitions = buildSequentialTransitions(sections);
       transitionsRef.current = transitions;
 
       const totalDuration =
         transitions.length > 0
           ? Math.max(...transitions.map((t) => t.glowEnd))
-          : BODY_FAST_END;
+          : 0;
 
       // Initialize mutable state
       mutableStatesRef.current = initSectionStates(sections, "aurebesh");
